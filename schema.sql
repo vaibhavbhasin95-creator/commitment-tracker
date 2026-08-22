@@ -24,8 +24,9 @@ CREATE TABLE IF NOT EXISTS commitments (
     owner_email TEXT,
     due_date TEXT,
     status TEXT NOT NULL DEFAULT 'pending',      -- 'pending' | 'in_progress' | 'done'
-    confidence_score REAL,
+    confidence_score REAL,                       -- NULL for manually-entered commitments
     source_quote TEXT,
+    external_ref TEXT,                           -- id/key in the external tracker, once synced (e.g. a Jira issue key)
     created_at TEXT NOT NULL
 );
 
@@ -62,7 +63,29 @@ CREATE TABLE IF NOT EXISTS tracker_sync_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     commitment_id INTEGER NOT NULL REFERENCES commitments(id),
     provider TEXT NOT NULL,
+    direction TEXT NOT NULL DEFAULT 'outbound',    -- 'outbound' (we pushed) | 'inbound' (tracker pushed to us)
     triggered_at TEXT NOT NULL,
-    status TEXT NOT NULL,                          -- 'mock_synced' | 'skipped'
+    status TEXT NOT NULL,                          -- 'mock_synced' | 'received' | 'skipped'
+    detail TEXT
+);
+
+-- Where the transcript itself is expected to come from. Separate from
+-- tracker_settings (that's where *tasks* go out to; this is where the
+-- *transcript* comes in from). Also mocked — "check now" just logs what
+-- would happen — since the real parsing engine isn't wired in yet.
+CREATE TABLE IF NOT EXISTS transcript_source_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_email TEXT NOT NULL UNIQUE,
+    provider TEXT NOT NULL DEFAULT 'none',         -- 'none' | 'zoom' | 'google_meet' | 'teams' | 'otter'
+    config_json TEXT NOT NULL DEFAULT '{}',
+    enabled INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS transcript_sync_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_email TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    triggered_at TEXT NOT NULL,
+    status TEXT NOT NULL,                          -- 'mock_checked'
     detail TEXT
 );

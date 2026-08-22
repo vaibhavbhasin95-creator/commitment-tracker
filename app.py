@@ -22,6 +22,23 @@ providers, in practice) is future work once a provider is chosen; users who
 don't configure a tracker are unaffected — the built-in status tracking
 above works exactly as before.
 
+Tracker sync is two-way in shape, not just push: outbound ("sync to
+tracker") is still mocked, but `/api/webhooks/tracker-update` is a *real*,
+functional inbound endpoint — point a Jira Automation rule or a Google Apps
+Script trigger at it and a status change made there updates the matching
+commitment here. Receiving a webhook needs no outbound credentials, so it's
+safe to make real even while the push direction stays mocked.
+`simulate-inbound-update` exercises the same code path from the UI, so the
+round trip is demonstrable without a live external caller.
+
+`transcript_source_settings` is the same mock pattern again, one level
+earlier in the pipeline: which app (Zoom / Google Meet / Teams / Otter.ai)
+a user's transcripts *would* come from. "Check now" only logs what it would
+do — there's no real transcript parser wired in yet (that's being built
+separately). Until there is, meetings and their commitments can be entered
+by hand via `POST /api/meetings` (paste/upload a transcript) and
+`POST /api/commitments` (add a commitment to it) — see readme.md.
+
 Run:
     pip install flask
     python app.py
@@ -142,6 +159,58 @@ def list_meetings():
     ).fetchall()
     db.close()
     return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/meetings", methods=["POST"])
+def create_meeting():
+    """Manual transcript upload — the real path for getting a meeting into
+    the app today, since the automated parser isn't wired in yet."""
+    email = require_email()
+    if not email:
+        return jsonify({"error": "not identified"}), 401
+
+    data = request.get_json(force=True)
+    title = (data.get("title") or "").strip()
+    meeting_date = (data.get("meeting_date") or "").strip() or today_str()
+    transcript_excerpt = (data.get("transcript_excerpt") or "").strip() or None
+
+    if not title:
+        return jsonify({"error": "title is required"}), 400
+
+    db = get_db()
+    cur = db.execute(
+        "INSERT INTO meetings (owner_email, title, meeting_date, created_at, source, transcript_excerpt) "
+        "VALUES (?, ?, ?, ?, 'upload', ?)",
+        (email, title, meeting_date, now_iso(), transcript_excerpt),
+    )
+    meeting_id = cur.lastrowid
+    db.commit()
+    db.close()
+    return jsonify({"id": meeting_id}), 201
+
+
+@app.route("/api/meetings/<int:meeting_id>", methods=["GET"])
+def get_meeting(meeting_id):
+    email = require_email()
+    if not email:
+        return jsonify({"error": "not identified"}), 401
+
+    db = get_db()
+    meeting = db.execute(
+        "SELECT * FROM meetings WHERE id = ? AND owner_email = ?", (meeting_id, email)
+    ).fetchone()
+    if meeting is None:
+        db.close()
+        return jsonify({"error": "not found"}), 404
+
+    commitments = db.execute(
+        "SELECT * FROM commitments WHERE meeting_id = ? ORDER BY due_date ASC", (meeting_id,)
+    ).fetchall()
+    db.close()
+
+    result = dict(meeting)
+    result["commitments"] = [with_overdue_flag(dict(c)) for c in commitments]
+    return jsonify(result)
 
 
 DEMO_MEETINGS = [
@@ -304,6 +373,46 @@ def list_commitments():
     rows = db.execute(query, params).fetchall()
     db.close()
     return jsonify([with_overdue_flag(dict(r)) for r in rows])
+
+
+@app.route("/api/commitments", methods=["POST"])
+def create_commitment():
+    """Manual commitment entry, scoped to a meeting the user owns. Fills the
+    gap until the real transcript parser is wired in — confidence_score is
+    left NULL to distinguish a hand-entered commitment from an extracted
+    one in the UI."""
+    email = require_email()
+    if not email:
+        return jsonify({"error": "not identified"}), 401
+
+    data = request.get_json(force=True)
+    meeting_id = data.get("meeting_id")
+    task_text = (data.get("task_text") or "").strip()
+    owner_name = (data.get("owner_name") or "").strip()
+    owner_email = (data.get("owner_email") or "").strip() or None
+    due_date = (data.get("due_date") or "").strip() or None
+    source_quote = (data.get("source_quote") or "").strip() or None
+
+    if not task_text or not owner_name:
+        return jsonify({"error": "task_text and owner_name are required"}), 400
+
+    db = get_db()
+    meeting = db.execute(
+        "SELECT id FROM meetings WHERE id = ? AND owner_email = ?", (meeting_id, email)
+    ).fetchone()
+    if meeting is None:
+        db.close()
+        return jsonify({"error": "meeting not found"}), 404
+
+    cur = db.execute(
+        "INSERT INTO commitments "
+        "(meeting_id, task_text, owner_name, owner_email, due_date, status, confidence_score, source_quote, created_at) "
+        "VALUES (?, ?, ?, ?, ?, 'pending', NULL, ?, ?)",
+        (meeting_id, task_text, owner_name, owner_email, due_date, source_quote, now_iso()),
+    )
+    db.commit()
+    db.close()
+    return jsonify({"id": cur.lastrowid}), 201
 
 
 def get_commitment_or_404(db, email, commitment_id):
@@ -530,20 +639,243 @@ def sync_tracker(commitment_id):
 
     provider = tracker["provider"]
     config = json.loads(tracker["config_json"])
+
+    # First sync mints a fake external reference (a real integration would get
+    # this back from the Jira/Sheets API call) so the inbound side has
+    # something to match a later status update against.
+    external_ref = row["external_ref"]
+    if not external_ref:
+        external_ref = (
+            f"{config.get('project_key', 'TASK')}-{commitment_id}"
+            if provider == "jira"
+            else f"row-{commitment_id}"
+        )
+        db.execute("UPDATE commitments SET external_ref = ? WHERE id = ?", (external_ref, commitment_id))
+
     if provider == "jira":
-        detail = f"Would create/update a Jira issue in project {config.get('project_key')} at {config.get('base_url')}"
+        detail = f"Would create/update Jira issue {external_ref} in project {config.get('project_key')} at {config.get('base_url')}"
     else:
-        detail = f"Would append a row to Google Sheet {config.get('spreadsheet_id')}"
+        detail = f"Would write {external_ref} to Google Sheet {config.get('spreadsheet_id')}"
 
     triggered_at = now_iso()
     db.execute(
-        "INSERT INTO tracker_sync_log (commitment_id, provider, triggered_at, status, detail) "
-        "VALUES (?, ?, ?, 'mock_synced', ?)",
+        "INSERT INTO tracker_sync_log (commitment_id, provider, direction, triggered_at, status, detail) "
+        "VALUES (?, ?, 'outbound', ?, 'mock_synced', ?)",
         (commitment_id, provider, triggered_at, detail),
     )
     db.commit()
     db.close()
-    return jsonify({"ok": True, "triggered_at": triggered_at, "provider": provider, "status": "mock_synced", "detail": detail}), 201
+    return jsonify({
+        "ok": True, "triggered_at": triggered_at, "provider": provider,
+        "status": "mock_synced", "detail": detail, "external_ref": external_ref,
+    }), 201
+
+
+def apply_inbound_tracker_update(db, commitment_id, new_status, provider, source_label):
+    """Shared by the real webhook and the UI's simulate button: applies a
+    status change that originated in the external tracker, and logs it as
+    an inbound sync event (as opposed to the outbound 'push' direction)."""
+    if new_status not in ("pending", "in_progress", "done"):
+        return None, "status must be one of pending, in_progress, done"
+
+    db.execute("UPDATE commitments SET status = ? WHERE id = ?", (new_status, commitment_id))
+    triggered_at = now_iso()
+    detail = f"Status changed to '{new_status}' via {source_label}"
+    db.execute(
+        "INSERT INTO tracker_sync_log (commitment_id, provider, direction, triggered_at, status, detail) "
+        "VALUES (?, ?, 'inbound', ?, 'received', ?)",
+        (commitment_id, provider, triggered_at, detail),
+    )
+    return {"triggered_at": triggered_at, "detail": detail}, None
+
+
+@app.route("/api/commitments/<int:commitment_id>/simulate-inbound-update", methods=["POST"])
+def simulate_inbound_update(commitment_id):
+    """UI test button: exercises the same code path a real inbound webhook
+    call would, so two-way sync is demonstrable without a live Jira/Sheets
+    automation calling in. Session-authenticated, unlike the public webhook
+    below."""
+    email = require_email()
+    if not email:
+        return jsonify({"error": "not identified"}), 401
+
+    data = request.get_json(force=True)
+    new_status = data.get("status")
+
+    db = get_db()
+    row = get_commitment_or_404(db, email, commitment_id)
+    if row is None:
+        db.close()
+        return jsonify({"error": "not found"}), 404
+    if not row["external_ref"]:
+        db.close()
+        return jsonify({"error": "sync to the tracker at least once first — nothing to simulate an update against yet"}), 400
+
+    tracker = db.execute(
+        "SELECT provider FROM tracker_settings WHERE user_email = ?", (email,)
+    ).fetchone()
+    provider = tracker["provider"] if tracker else "tracker"
+    label = {"jira": "Jira", "google_sheets": "Google Sheets"}.get(provider, provider)
+
+    result, error = apply_inbound_tracker_update(db, commitment_id, new_status, provider, f"{label} (simulated)")
+    if error:
+        db.close()
+        return jsonify({"error": error}), 400
+    db.commit()
+    db.close()
+    return jsonify({"ok": True, **result}), 201
+
+
+@app.route("/api/webhooks/tracker-update", methods=["POST"])
+def tracker_webhook():
+    """Real, functional inbound endpoint — the two-way half of the tracker
+    integration. Point a Jira Automation rule or a Google Apps Script
+    trigger at this URL when a task's status changes there, and the
+    matching commitment here gets updated. No outbound call is made
+    anywhere in this app; this route only *receives*.
+
+    Not session-protected — an external service has no browser session —
+    so the commitment is identified via `email` + `external_ref` in the
+    body instead. Intentionally simple for a prototype with no public
+    deployment yet; a real deployment would want a shared secret or
+    signature check here.
+    """
+    data = request.get_json(force=True)
+    email = (data.get("email") or "").strip().lower()
+    external_ref = (data.get("external_ref") or "").strip()
+    new_status = data.get("status")
+    provider = data.get("provider", "external")
+
+    if not email or not external_ref:
+        return jsonify({"error": "email and external_ref are required"}), 400
+
+    db = get_db()
+    row = db.execute(
+        "SELECT commitments.id FROM commitments JOIN meetings ON meetings.id = commitments.meeting_id "
+        "WHERE meetings.owner_email = ? AND commitments.external_ref = ?",
+        (email, external_ref),
+    ).fetchone()
+    if row is None:
+        db.close()
+        return jsonify({"error": "no matching commitment for that email/external_ref"}), 404
+
+    result, error = apply_inbound_tracker_update(db, row["id"], new_status, provider, provider)
+    if error:
+        db.close()
+        return jsonify({"error": error}), 400
+    db.commit()
+    db.close()
+    return jsonify({"ok": True, "commitment_id": row["id"], **result}), 201
+
+
+# ---------- transcript source (Zoom / Google Meet / Teams / Otter.ai) ----------
+
+TRANSCRIPT_SOURCE_REQUIRED_FIELDS = {
+    "zoom": ["account_email", "api_key"],
+    "google_meet": ["workspace_email", "api_key"],
+    "teams": ["tenant_id", "api_key"],
+    "otter": ["account_email", "api_key"],
+}
+TRANSCRIPT_SOURCE_LABELS = {
+    "zoom": "Zoom", "google_meet": "Google Meet", "teams": "Microsoft Teams", "otter": "Otter.ai",
+}
+
+
+@app.route("/api/transcript-source-settings", methods=["GET"])
+def get_transcript_source_settings():
+    email = require_email()
+    if not email:
+        return jsonify({"error": "not identified"}), 401
+    db = get_db()
+    row = db.execute(
+        "SELECT provider, config_json, enabled FROM transcript_source_settings WHERE user_email = ?", (email,)
+    ).fetchone()
+    db.close()
+    if row is None:
+        return jsonify({"provider": "none", "config": {}, "enabled": True})
+    return jsonify({
+        "provider": row["provider"],
+        "config": json.loads(row["config_json"]),
+        "enabled": bool(row["enabled"]),
+    })
+
+
+@app.route("/api/transcript-source-settings", methods=["POST"])
+def save_transcript_source_settings():
+    email = require_email()
+    if not email:
+        return jsonify({"error": "not identified"}), 401
+
+    data = request.get_json(force=True)
+    provider = data.get("provider", "none")
+    config = data.get("config") or {}
+    enabled = 1 if data.get("enabled", True) else 0
+
+    if provider not in ("none", "zoom", "google_meet", "teams", "otter"):
+        return jsonify({"error": "provider must be one of none, zoom, google_meet, teams, otter"}), 400
+    if provider != "none":
+        missing = [f for f in TRANSCRIPT_SOURCE_REQUIRED_FIELDS[provider] if not (config.get(f) or "").strip()]
+        if missing:
+            return jsonify({"error": f"missing required field(s) for {provider}: {', '.join(missing)}"}), 400
+
+    db = get_db()
+    db.execute(
+        "INSERT INTO transcript_source_settings (user_email, provider, config_json, enabled) "
+        "VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(user_email) DO UPDATE SET "
+        "provider = excluded.provider, config_json = excluded.config_json, enabled = excluded.enabled",
+        (email, provider, json.dumps(config), enabled),
+    )
+    db.commit()
+    db.close()
+    return jsonify({"ok": True}), 201
+
+
+@app.route("/api/transcript-source/check-now", methods=["POST"])
+def check_transcript_source():
+    """Mock only: logs what checking for new transcripts would do. No real
+    Zoom/Meet/Teams/Otter API call is made — and even if it were, there's no
+    parser yet on this end to turn a transcript into commitments. Upload one
+    by hand in the meantime (POST /api/meetings)."""
+    email = require_email()
+    if not email:
+        return jsonify({"error": "not identified"}), 401
+
+    db = get_db()
+    source = db.execute(
+        "SELECT provider, config_json, enabled FROM transcript_source_settings WHERE user_email = ?", (email,)
+    ).fetchone()
+    if source is None or source["provider"] == "none" or not source["enabled"]:
+        db.close()
+        return jsonify({"error": "no transcript source configured — set one up below, or upload a transcript manually"}), 400
+
+    provider = source["provider"]
+    config = json.loads(source["config_json"])
+    account = config.get("account_email") or config.get("workspace_email") or config.get("tenant_id") or "your account"
+    detail = f"Would check {TRANSCRIPT_SOURCE_LABELS[provider]} ({account}) for new meeting transcripts"
+
+    triggered_at = now_iso()
+    db.execute(
+        "INSERT INTO transcript_sync_log (user_email, provider, triggered_at, status, detail) "
+        "VALUES (?, ?, ?, 'mock_checked', ?)",
+        (email, provider, triggered_at, detail),
+    )
+    db.commit()
+    db.close()
+    return jsonify({"ok": True, "triggered_at": triggered_at, "provider": provider, "status": "mock_checked", "detail": detail}), 201
+
+
+@app.route("/api/transcript-source/log", methods=["GET"])
+def transcript_source_log():
+    email = require_email()
+    if not email:
+        return jsonify({"error": "not identified"}), 401
+    db = get_db()
+    rows = db.execute(
+        "SELECT * FROM transcript_sync_log WHERE user_email = ? ORDER BY triggered_at DESC LIMIT 10", (email,)
+    ).fetchall()
+    db.close()
+    return jsonify([dict(r) for r in rows])
 
 
 if __name__ == "__main__":

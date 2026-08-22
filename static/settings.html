@@ -64,6 +64,33 @@
                             <option value="email">Email</option>
                         </select>
                     </div>
+
+                    <details class="help-steps channel-help" id="channel-help-slack">
+                        <summary>How to get a Slack webhook URL</summary>
+                        <ol>
+                            <li>Go to <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> and create (or open) an app for your workspace.</li>
+                            <li>Turn on "Incoming Webhooks", then click "Add New Webhook to Workspace".</li>
+                            <li>Pick the channel that should receive nudges and authorize it.</li>
+                            <li>Copy the generated URL (starts with <code style="display:inline;padding:1px 4px;">https://hooks.slack.com/services/...</code>) into the field below.</li>
+                        </ol>
+                    </details>
+                    <details class="help-steps channel-help" id="channel-help-teams" style="display:none;">
+                        <summary>How to get a Teams webhook URL</summary>
+                        <ol>
+                            <li>In the Teams channel that should receive nudges, open the "..." menu → Connectors (or Workflows on newer Teams).</li>
+                            <li>Add an "Incoming Webhook" connector and give it a name.</li>
+                            <li>Copy the URL it generates into the field below.</li>
+                        </ol>
+                    </details>
+                    <details class="help-steps channel-help" id="channel-help-email" style="display:none;">
+                        <summary>How to get an email API key</summary>
+                        <ol>
+                            <li>Sign up with a transactional email provider (e.g. Resend, SendGrid, Postmark).</li>
+                            <li>Create an API key with send permission.</li>
+                            <li>Paste that key into the field below.</li>
+                        </ol>
+                    </details>
+
                     <div>
                         <label for="webhook">Webhook URL / API key</label>
                         <input type="text" id="webhook" placeholder="https://hooks.slack.com/services/..." required>
@@ -108,6 +135,15 @@
                     </div>
 
                     <div id="tracker-fields-jira" class="tracker-fields" style="display:none;">
+                        <details class="help-steps">
+                            <summary>How to get your Jira details</summary>
+                            <ol>
+                                <li>Log in to Atlassian and go to <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener">API tokens</a>.</li>
+                                <li>Click "Create API token", name it, and copy it — that's the API token below.</li>
+                                <li>Your base URL is the address you use for Jira, e.g. <code style="display:inline;padding:1px 4px;">https://yourteam.atlassian.net</code>.</li>
+                                <li>Find your project key under Project Settings → Details (a short code like ENG or OPS).</li>
+                            </ol>
+                        </details>
                         <div>
                             <label for="jira-base-url">Jira base URL</label>
                             <input type="text" id="jira-base-url" placeholder="https://yourteam.atlassian.net">
@@ -127,6 +163,16 @@
                     </div>
 
                     <div id="tracker-fields-google_sheets" class="tracker-fields" style="display:none;">
+                        <details class="help-steps">
+                            <summary>How to get your Google Sheets details</summary>
+                            <ol>
+                                <li>Open the <a href="https://console.cloud.google.com" target="_blank" rel="noopener">Google Cloud console</a> and create (or pick) a project.</li>
+                                <li>Enable the "Google Sheets API" for that project.</li>
+                                <li>Create credentials — an API key, or a service account (with a JSON key) if you want write access.</li>
+                                <li>If you used a service account, share the target spreadsheet with its email address.</li>
+                                <li>Copy the spreadsheet ID from its URL — the long string between <code style="display:inline;padding:1px 4px;">/d/</code> and <code style="display:inline;padding:1px 4px;">/edit</code>.</li>
+                            </ol>
+                        </details>
                         <div>
                             <label for="sheets-id">Spreadsheet ID</label>
                             <input type="text" id="sheets-id" placeholder="from the sheet's URL">
@@ -147,6 +193,137 @@
             <div class="saved-settings">
                 <div class="section-title">Current tracker</div>
                 <div id="tracker-summary"></div>
+            </div>
+
+            <div class="webhook-box">
+                <strong>Two-way sync:</strong> status changes made here push to the tracker (mocked, above).
+                For changes made <em>in</em> Jira or the sheet to flow back here, point an automation at:
+                <code>POST /api/webhooks/tracker-update</code>
+                <div style="margin-top:6px;">Body:</div>
+                <code>{ "email": "you@company.com", "external_ref": "ENG-142", "status": "done", "provider": "jira" }</code>
+                <ol style="margin:10px 0 0; padding-left:18px; color:var(--text-muted); line-height:1.6;">
+                    <li><strong>Jira:</strong> Project Settings → Automation → new rule, trigger "Issue transitioned", action "Send web request" to the URL above with that JSON body (map the issue key to <code style="display:inline;padding:1px 4px;">external_ref</code>).</li>
+                    <li><strong>Google Sheets:</strong> Extensions → Apps Script → add an <code style="display:inline;padding:1px 4px;">onEdit</code> trigger that POSTs the same body when a status cell changes.</li>
+                </ol>
+                <div style="margin-top:8px; color:var(--text-faint); font-size:12px;">
+                    A commitment gets an <code style="display:inline;padding:1px 4px;">external_ref</code> the first time you sync it to the tracker — use the "Simulate update from tracker" button on a commitment to try this without setting up a real automation.
+                </div>
+            </div>
+
+            <h2 class="page-heading" style="margin-top:44px;">Transcript source</h2>
+            <div class="mock-notice">
+                Also a prototype: "check now" is simulated — no real Zoom/Meet/Teams/Otter call is made, and
+                there's no parser here yet to turn a transcript into commitments (that's being built separately).
+                Whatever you pick here, you can always upload a transcript by hand from the dashboard.
+            </div>
+
+            <div class="card">
+                <div class="section-title">Where should transcripts come from?</div>
+                <form class="settings-form" id="transcript-form">
+                    <div>
+                        <label for="transcript-provider">Provider</label>
+                        <select id="transcript-provider">
+                            <option value="none">None — I'll upload transcripts manually</option>
+                            <option value="zoom">Zoom</option>
+                            <option value="google_meet">Google Meet</option>
+                            <option value="teams">Microsoft Teams</option>
+                            <option value="otter">Otter.ai</option>
+                        </select>
+                    </div>
+
+                    <div id="transcript-fields-zoom" class="tracker-fields" style="display:none;">
+                        <details class="help-steps">
+                            <summary>How to get your Zoom details</summary>
+                            <ol>
+                                <li>Go to the <a href="https://marketplace.zoom.us" target="_blank" rel="noopener">Zoom App Marketplace</a> and sign in.</li>
+                                <li>Under "Develop", build (or use) a Server-to-Server OAuth app.</li>
+                                <li>Grant it the <code style="display:inline;padding:1px 4px;">cloud_recording:read</code> scope so it can read meeting transcripts.</li>
+                                <li>Enter your Zoom account email and the app's credentials below.</li>
+                            </ol>
+                        </details>
+                        <div>
+                            <label for="zoom-email">Account email</label>
+                            <input type="email" id="zoom-email" placeholder="you@company.com">
+                        </div>
+                        <div>
+                            <label for="zoom-key">API key</label>
+                            <input type="text" id="zoom-key" placeholder="Zoom app credentials">
+                        </div>
+                    </div>
+
+                    <div id="transcript-fields-google_meet" class="tracker-fields" style="display:none;">
+                        <details class="help-steps">
+                            <summary>How to get your Google Meet details</summary>
+                            <ol>
+                                <li>Meet transcripts save to Google Drive/Docs after a recorded meeting.</li>
+                                <li>In the <a href="https://console.cloud.google.com" target="_blank" rel="noopener">Google Cloud console</a>, enable the Drive API for a project.</li>
+                                <li>Create an API key or service account with access to your Workspace transcripts.</li>
+                                <li>Enter your Workspace account email and that API key below.</li>
+                            </ol>
+                        </details>
+                        <div>
+                            <label for="meet-email">Workspace account email</label>
+                            <input type="email" id="meet-email" placeholder="you@company.com">
+                        </div>
+                        <div>
+                            <label for="meet-key">API key</label>
+                            <input type="text" id="meet-key" placeholder="Google API key">
+                        </div>
+                    </div>
+
+                    <div id="transcript-fields-teams" class="tracker-fields" style="display:none;">
+                        <details class="help-steps">
+                            <summary>How to get your Teams details</summary>
+                            <ol>
+                                <li>In the <a href="https://portal.azure.com" target="_blank" rel="noopener">Azure portal</a>, register an app under Azure Active Directory.</li>
+                                <li>Grant it the <code style="display:inline;padding:1px 4px;">OnlineMeetingTranscript.Read.All</code> Graph API permission (needs admin consent).</li>
+                                <li>Copy your Tenant ID from the Azure AD overview page.</li>
+                                <li>Generate a client secret to use as the API key below.</li>
+                            </ol>
+                        </details>
+                        <div>
+                            <label for="teams-tenant">Tenant ID</label>
+                            <input type="text" id="teams-tenant" placeholder="Azure AD tenant ID">
+                        </div>
+                        <div>
+                            <label for="teams-key">API key</label>
+                            <input type="text" id="teams-key" placeholder="Client secret">
+                        </div>
+                    </div>
+
+                    <div id="transcript-fields-otter" class="tracker-fields" style="display:none;">
+                        <details class="help-steps">
+                            <summary>How to get your Otter.ai details</summary>
+                            <ol>
+                                <li>Log in to <a href="https://otter.ai" target="_blank" rel="noopener">otter.ai</a> and go to Settings → Integrations.</li>
+                                <li>Generate an API key for your account (available on eligible plans).</li>
+                                <li>Enter your Otter account email and that API key below.</li>
+                            </ol>
+                        </details>
+                        <div>
+                            <label for="otter-email">Account email</label>
+                            <input type="email" id="otter-email" placeholder="you@company.com">
+                        </div>
+                        <div>
+                            <label for="otter-key">API key</label>
+                            <input type="text" id="otter-key" placeholder="Otter API key">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label><input type="checkbox" id="transcript-enabled" checked style="width:auto; margin-right:6px;">Enabled</label>
+                    </div>
+                    <button type="submit" class="btn" style="justify-self:start;">Save transcript source</button>
+                </form>
+            </div>
+
+            <div class="toolbar" style="margin-top:20px; margin-bottom:0;">
+                <div class="section-title" style="margin-bottom:0;">Current source</div>
+                <button class="btn secondary" id="check-transcript-btn">Check for new transcripts</button>
+            </div>
+            <div class="saved-settings" style="margin-top:12px;">
+                <div id="transcript-summary"></div>
+                <div id="transcript-log" style="margin-top:10px;"></div>
             </div>
         </div>
     </div>
@@ -177,10 +354,23 @@ async function loadSettings() {
 }
 
 const TRACKER_LABELS = { none: "None", jira: "Jira", google_sheets: "Google Sheets" };
+const TRANSCRIPT_LABELS = { none: "None", zoom: "Zoom", google_meet: "Google Meet", teams: "Microsoft Teams", otter: "Otter.ai" };
 
 function showTrackerFields(provider) {
-    document.querySelectorAll(".tracker-fields").forEach(el => { el.style.display = "none"; });
+    document.querySelectorAll("#tracker-form .tracker-fields").forEach(el => { el.style.display = "none"; });
     const el = document.getElementById(`tracker-fields-${provider}`);
+    if (el) el.style.display = "grid";
+}
+
+function showChannelHelp(channel) {
+    document.querySelectorAll(".channel-help").forEach(el => { el.style.display = "none"; });
+    const el = document.getElementById(`channel-help-${channel}`);
+    if (el) el.style.display = "block";
+}
+
+function showTranscriptFields(provider) {
+    document.querySelectorAll("#transcript-form .tracker-fields").forEach(el => { el.style.display = "none"; });
+    const el = document.getElementById(`transcript-fields-${provider}`);
     if (el) el.style.display = "grid";
 }
 
@@ -218,12 +408,68 @@ async function loadTrackerSettings() {
     }
 }
 
+async function loadTranscriptSettings() {
+    const t = await api("/api/transcript-source-settings");
+    document.getElementById("transcript-provider").value = t.provider;
+    document.getElementById("transcript-enabled").checked = t.enabled;
+    showTranscriptFields(t.provider);
+
+    if (t.provider === "zoom") {
+        document.getElementById("zoom-email").value = t.config.account_email || "";
+        document.getElementById("zoom-key").value = t.config.api_key || "";
+    } else if (t.provider === "google_meet") {
+        document.getElementById("meet-email").value = t.config.workspace_email || "";
+        document.getElementById("meet-key").value = t.config.api_key || "";
+    } else if (t.provider === "teams") {
+        document.getElementById("teams-tenant").value = t.config.tenant_id || "";
+        document.getElementById("teams-key").value = t.config.api_key || "";
+    } else if (t.provider === "otter") {
+        document.getElementById("otter-email").value = t.config.account_email || "";
+        document.getElementById("otter-key").value = t.config.api_key || "";
+    }
+
+    const summary = document.getElementById("transcript-summary");
+    if (t.provider === "none") {
+        summary.innerHTML = '<div style="color:var(--text-muted); font-size:14px;">No transcript source connected — upload transcripts by hand from the dashboard.</div>';
+    } else {
+        const account = t.config.account_email || t.config.workspace_email || t.config.tenant_id || "?";
+        summary.innerHTML = `
+            <div class="saved-settings-item">
+                <div>
+                    <div class="chan">${TRANSCRIPT_LABELS[t.provider]}</div>
+                    <div class="cadence">${account} · ${t.enabled ? "enabled" : "disabled"}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    await loadTranscriptLog();
+}
+
+async function loadTranscriptLog() {
+    const rows = await api("/api/transcript-source/log");
+    const logEl = document.getElementById("transcript-log");
+    if (rows.length === 0) {
+        logEl.innerHTML = "";
+        return;
+    }
+    logEl.innerHTML = `<div class="cadence" style="margin-bottom:6px;">Recent checks</div>` + rows.map(r => `
+        <div class="nudge-history-item">${formatDateTime(r.triggered_at)} — ${r.detail}</div>
+    `).join("");
+}
+
 async function init() {
     initThemeToggle();
     await requireIdentified();
     await initNav();
     await loadSettings();
     await loadTrackerSettings();
+    await loadTranscriptSettings();
+    showChannelHelp(document.getElementById("channel").value);
+
+    document.getElementById("channel").addEventListener("change", (e) => {
+        showChannelHelp(e.target.value);
+    });
 
     document.getElementById("settings-form").addEventListener("submit", async (e) => {
         e.preventDefault();
@@ -267,6 +513,55 @@ async function init() {
             await api("/api/tracker-settings", { method: "POST", body: { provider, config, enabled } });
             toast("Tracker saved");
             await loadTrackerSettings();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    document.getElementById("transcript-provider").addEventListener("change", (e) => {
+        showTranscriptFields(e.target.value);
+    });
+
+    document.getElementById("transcript-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const provider = document.getElementById("transcript-provider").value;
+        let config = {};
+        if (provider === "zoom") {
+            config = {
+                account_email: document.getElementById("zoom-email").value.trim(),
+                api_key: document.getElementById("zoom-key").value.trim(),
+            };
+        } else if (provider === "google_meet") {
+            config = {
+                workspace_email: document.getElementById("meet-email").value.trim(),
+                api_key: document.getElementById("meet-key").value.trim(),
+            };
+        } else if (provider === "teams") {
+            config = {
+                tenant_id: document.getElementById("teams-tenant").value.trim(),
+                api_key: document.getElementById("teams-key").value.trim(),
+            };
+        } else if (provider === "otter") {
+            config = {
+                account_email: document.getElementById("otter-email").value.trim(),
+                api_key: document.getElementById("otter-key").value.trim(),
+            };
+        }
+        const enabled = document.getElementById("transcript-enabled").checked;
+        try {
+            await api("/api/transcript-source-settings", { method: "POST", body: { provider, config, enabled } });
+            toast("Transcript source saved");
+            await loadTranscriptSettings();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    document.getElementById("check-transcript-btn").addEventListener("click", async () => {
+        try {
+            await api("/api/transcript-source/check-now", { method: "POST" });
+            toast("Checked (mock — nothing was actually fetched)");
+            await loadTranscriptLog();
         } catch (err) {
             toast(err.message);
         }

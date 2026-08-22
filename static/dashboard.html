@@ -90,7 +90,10 @@
                         <option value="">All owners</option>
                     </select>
                 </div>
-                <button class="btn secondary" id="seed-demo-btn">Load demo meeting</button>
+                <div style="display:flex; gap:10px;">
+                    <button class="btn secondary" id="upload-transcript-btn">Upload transcript</button>
+                    <button class="btn secondary" id="seed-demo-btn">Load demo meeting</button>
+                </div>
             </div>
 
             <div id="commitments-wrap">
@@ -156,12 +159,94 @@
         </div>
 
         <div class="section-title" style="margin-top:22px;">Task tracker sync</div>
+        <div id="modal-external-ref" style="font-size:12px; color:var(--text-faint); margin-bottom:6px;"></div>
         <div class="nudge-history" id="modal-tracker-history"></div>
 
         <div class="modal-actions" id="modal-tracker-actions">
             <button class="btn secondary" id="sync-tracker-btn">Sync to tracker</button>
             <span style="font-size:12px; color:var(--text-faint);" id="modal-tracker-note">Mock only — no request actually sent</span>
         </div>
+
+        <div class="modal-actions" id="modal-simulate-actions" style="margin-top:0;">
+            <select id="simulate-status">
+                <option value="pending">Pending</option>
+                <option value="in_progress">In progress</option>
+                <option value="done">Done</option>
+            </select>
+            <button class="btn secondary" id="simulate-inbound-btn">Simulate update from tracker</button>
+            <span style="font-size:12px; color:var(--text-faint);">Two-way test — pretends the tracker just pushed this status to us</span>
+        </div>
+    </div>
+</div>
+
+<!-- meeting detail / add-commitment modal -->
+<div class="modal-backdrop" id="meeting-modal-backdrop">
+    <div class="modal" style="max-width:640px;">
+        <button class="modal-close" id="meeting-modal-close">&times;</button>
+        <h2 id="meeting-modal-title"></h2>
+        <div id="meeting-modal-meta" style="font-size:13px; color:var(--text-muted); margin-bottom:10px;"></div>
+        <div class="quote" id="meeting-modal-transcript" style="max-height:160px; overflow-y:auto; white-space:pre-wrap;"></div>
+
+        <div class="section-title" style="margin-top:20px;">Commitments in this meeting</div>
+        <div class="nudge-history" id="meeting-modal-commitments"></div>
+
+        <div class="section-title" style="margin-top:20px;">Add a commitment</div>
+        <p style="font-size:12.5px; color:var(--text-faint); margin:-6px 0 12px;">No transcript parser is wired in yet — add what came out of this meeting by hand.</p>
+        <form id="add-commitment-form" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+            <div style="grid-column:1/-1;">
+                <label for="ac-task">Task</label>
+                <input id="ac-task" required style="width:100%;">
+            </div>
+            <div>
+                <label for="ac-owner">Owner name</label>
+                <input id="ac-owner" required style="width:100%;">
+            </div>
+            <div>
+                <label for="ac-owner-email">Owner email (optional)</label>
+                <input id="ac-owner-email" type="email" style="width:100%;">
+            </div>
+            <div>
+                <label for="ac-due">Due date</label>
+                <input id="ac-due" type="date" style="width:100%;">
+            </div>
+            <div>
+                <label for="ac-quote">Source quote (optional)</label>
+                <input id="ac-quote" style="width:100%;">
+            </div>
+            <div style="grid-column:1/-1;">
+                <button type="submit" class="btn secondary">Add commitment</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- upload transcript modal -->
+<div class="modal-backdrop" id="upload-modal-backdrop">
+    <div class="modal">
+        <button class="modal-close" id="upload-modal-close">&times;</button>
+        <h2>Upload a transcript</h2>
+        <p style="font-size:12.5px; color:var(--text-faint); margin:4px 0 14px;">
+            No parser is wired in yet, so this just saves the transcript as a meeting — add commitments to it by hand afterward (or from your configured transcript source, once that's connected in Integrations).
+        </p>
+        <form id="upload-form" style="display:grid; gap:14px;">
+            <div>
+                <label for="upload-title">Meeting title</label>
+                <input id="upload-title" required style="width:100%;">
+            </div>
+            <div>
+                <label for="upload-date">Meeting date</label>
+                <input id="upload-date" type="date" style="width:100%;">
+            </div>
+            <div>
+                <label for="upload-file">Upload a .txt file (optional)</label>
+                <input id="upload-file" type="file" accept=".txt" style="width:100%;">
+            </div>
+            <div>
+                <label for="upload-text">Or paste the transcript</label>
+                <textarea id="upload-text" rows="7" style="width:100%;"></textarea>
+            </div>
+            <button type="submit" class="btn" style="justify-self:start;">Save meeting</button>
+        </form>
     </div>
 </div>
 
@@ -179,11 +264,14 @@ function renderMeetings(meetings) {
         return;
     }
     list.innerHTML = meetings.map(m => `
-        <div class="meeting-chip">
+        <div class="meeting-chip meeting-chip-clickable" data-id="${m.id}">
             <strong>${escapeHtml(m.title)}</strong>
             <span class="meeting-date"> · ${formatDate(m.meeting_date)} · ${m.source}</span>
         </div>
     `).join("");
+    list.querySelectorAll(".meeting-chip").forEach(chip => {
+        chip.addEventListener("click", () => openMeetingModal(parseInt(chip.dataset.id, 10)));
+    });
 }
 
 function populateOwnerFilter(commitments) {
@@ -306,9 +394,13 @@ async function openModal(id) {
         trackerHistoryEl.innerHTML = '<div class="nudge-history-empty">No syncs yet.</div>';
     } else {
         trackerHistoryEl.innerHTML = c.tracker_history.map(t => `
-            <div class="nudge-history-item">${formatDateTime(t.triggered_at)} — ${t.detail}</div>
+            <div class="nudge-history-item">${t.direction === "inbound" ? "↓ from tracker" : "↑ to tracker"} · ${formatDateTime(t.triggered_at)} — ${t.detail}</div>
         `).join("");
     }
+    document.getElementById("modal-external-ref").textContent = c.external_ref
+        ? `Linked to tracker as ${c.external_ref}`
+        : "Not synced to a tracker yet";
+
     const syncBtn = document.getElementById("sync-tracker-btn");
     const trackerNote = document.getElementById("modal-tracker-note");
     syncBtn.disabled = !c.tracker_configured;
@@ -316,12 +408,54 @@ async function openModal(id) {
         ? "Mock only — no request actually sent"
         : "No task tracker connected — set one up in Integrations";
 
+    const simulateBtn = document.getElementById("simulate-inbound-btn");
+    simulateBtn.disabled = !c.external_ref;
+    document.getElementById("simulate-status").disabled = !c.external_ref;
+
     document.getElementById("modal-backdrop").classList.add("open");
 }
 
 function closeModal() {
     document.getElementById("modal-backdrop").classList.remove("open");
     currentCommitmentId = null;
+}
+
+let currentMeetingId = null;
+
+async function openMeetingModal(id) {
+    const m = await api(`/api/meetings/${id}`);
+    currentMeetingId = id;
+    document.getElementById("meeting-modal-title").textContent = m.title;
+    document.getElementById("meeting-modal-meta").textContent = `${formatDate(m.meeting_date)} · ${m.source}`;
+    document.getElementById("meeting-modal-transcript").textContent = m.transcript_excerpt
+        ? m.transcript_excerpt
+        : "No transcript text saved for this meeting.";
+
+    const listEl = document.getElementById("meeting-modal-commitments");
+    if (m.commitments.length === 0) {
+        listEl.innerHTML = '<div class="nudge-history-empty">No commitments yet.</div>';
+    } else {
+        listEl.innerHTML = m.commitments.map(c => `
+            <div class="nudge-history-item">
+                <strong>${escapeHtml(c.task_text)}</strong> — ${escapeHtml(c.owner_name)}
+                · <span class="badge status-${c.status}">${STATUS_LABELS[c.status]}</span>
+                ${c.is_overdue ? '<span class="badge overdue">Overdue</span>' : ""}
+            </div>
+        `).join("");
+    }
+
+    document.getElementById("meeting-modal-backdrop").classList.add("open");
+}
+
+function closeMeetingModal() {
+    document.getElementById("meeting-modal-backdrop").classList.remove("open");
+    currentMeetingId = null;
+    document.getElementById("add-commitment-form").reset();
+}
+
+function closeUploadModal() {
+    document.getElementById("upload-modal-backdrop").classList.remove("open");
+    document.getElementById("upload-form").reset();
 }
 
 async function init() {
@@ -363,6 +497,21 @@ async function init() {
         }
     });
 
+    document.getElementById("simulate-inbound-btn").addEventListener("click", async () => {
+        const status = document.getElementById("simulate-status").value;
+        try {
+            await api(`/api/commitments/${currentCommitmentId}/simulate-inbound-update`, {
+                method: "POST",
+                body: { status },
+            });
+            toast("Simulated an incoming status update from the tracker");
+            await openModal(currentCommitmentId);
+            await loadAll();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
     async function seedDemo() {
         await api("/api/meetings/seed-demo", { method: "POST" });
         toast("Demo meeting loaded");
@@ -370,6 +519,68 @@ async function init() {
     }
     document.getElementById("seed-demo-btn").addEventListener("click", seedDemo);
     document.getElementById("empty-seed-btn").addEventListener("click", seedDemo);
+
+    // ---------- meeting detail / add commitment ----------
+
+    document.getElementById("meeting-modal-close").addEventListener("click", closeMeetingModal);
+    document.getElementById("meeting-modal-backdrop").addEventListener("click", (e) => {
+        if (e.target.id === "meeting-modal-backdrop") closeMeetingModal();
+    });
+
+    document.getElementById("add-commitment-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        try {
+            await api("/api/commitments", {
+                method: "POST",
+                body: {
+                    meeting_id: currentMeetingId,
+                    task_text: document.getElementById("ac-task").value.trim(),
+                    owner_name: document.getElementById("ac-owner").value.trim(),
+                    owner_email: document.getElementById("ac-owner-email").value.trim(),
+                    due_date: document.getElementById("ac-due").value,
+                    source_quote: document.getElementById("ac-quote").value.trim(),
+                },
+            });
+            toast("Commitment added");
+            document.getElementById("add-commitment-form").reset();
+            await openMeetingModal(currentMeetingId);
+            await loadAll();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    // ---------- upload transcript ----------
+
+    document.getElementById("upload-transcript-btn").addEventListener("click", () => {
+        document.getElementById("upload-modal-backdrop").classList.add("open");
+    });
+    document.getElementById("upload-modal-close").addEventListener("click", closeUploadModal);
+    document.getElementById("upload-modal-backdrop").addEventListener("click", (e) => {
+        if (e.target.id === "upload-modal-backdrop") closeUploadModal();
+    });
+
+    document.getElementById("upload-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const title = document.getElementById("upload-title").value.trim();
+        const meeting_date = document.getElementById("upload-date").value;
+        const file = document.getElementById("upload-file").files[0];
+        const pastedText = document.getElementById("upload-text").value.trim();
+
+        let transcript_excerpt = pastedText;
+        if (file) {
+            transcript_excerpt = await file.text();
+        }
+
+        try {
+            await api("/api/meetings", { method: "POST", body: { title, meeting_date, transcript_excerpt } });
+            toast("Meeting saved");
+            closeUploadModal();
+            await loadAll();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
 }
 
 init();
