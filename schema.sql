@@ -1,0 +1,68 @@
+-- Meeting Commitment Tracker — local prototype schema
+
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS meetings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_email TEXT NOT NULL,
+    title TEXT NOT NULL,
+    meeting_date TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'generated',   -- 'upload' | 'generated'
+    transcript_excerpt TEXT
+);
+
+CREATE TABLE IF NOT EXISTS commitments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    meeting_id INTEGER NOT NULL REFERENCES meetings(id),
+    task_text TEXT NOT NULL,
+    owner_name TEXT NOT NULL,
+    owner_email TEXT,
+    due_date TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',      -- 'pending' | 'in_progress' | 'done'
+    confidence_score REAL,
+    source_quote TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS nudge_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_email TEXT NOT NULL,
+    channel TEXT NOT NULL,                       -- 'slack' | 'teams' | 'email'
+    webhook_or_key TEXT NOT NULL,
+    cadence TEXT NOT NULL DEFAULT 'day_before',   -- 'day_before' | 'on_due' | 'daily_after_overdue'
+    enabled INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(user_email, channel)
+);
+
+CREATE TABLE IF NOT EXISTS nudge_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    commitment_id INTEGER NOT NULL REFERENCES commitments(id),
+    triggered_at TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    status TEXT NOT NULL                          -- 'mock_sent' | 'skipped'
+);
+
+-- A user's external task tracker, e.g. their team already lives in Jira or a
+-- shared Google Sheet. One tracker per user (unlike nudge_settings, which
+-- allows several channels) — you follow up on a commitment in one place.
+CREATE TABLE IF NOT EXISTS tracker_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_email TEXT NOT NULL UNIQUE,
+    provider TEXT NOT NULL DEFAULT 'none',        -- 'none' | 'jira' | 'google_sheets'
+    config_json TEXT NOT NULL DEFAULT '{}',
+    enabled INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS tracker_sync_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    commitment_id INTEGER NOT NULL REFERENCES commitments(id),
+    provider TEXT NOT NULL,
+    triggered_at TEXT NOT NULL,
+    status TEXT NOT NULL,                          -- 'mock_synced' | 'skipped'
+    detail TEXT
+);
