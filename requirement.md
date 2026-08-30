@@ -46,6 +46,9 @@ Companion to [prd.md](prd.md) (the why) — this is the concrete, testable *what
 
 ### Setup guidance
 - FR20g. Every provider option across Nudges, Task Tracker, and Transcript Source shows an expandable "how to get these details" step list specific to that provider, so a user isn't left to search for where a webhook URL or API key comes from.
+- FR20h. Each of Nudges, Task Tracker, and Transcript Source offers a "Custom" option alongside the predefined providers, letting a user name their own app and enter generic credentials (an endpoint/webhook URL and an API key), for tools not on the predefined list.
+- FR20i. For a Custom app, the "how to get these details" steps are not hand-written; they are suggested on request via a live AI call, scoped to the category (nudge / tracker / transcript source) and the app name the user typed. If no AI provider is configured, or the call fails, a generic fallback list is shown instead — either way, the app keeps working.
+- FR20j. Any setup steps produced by FR20i (AI or fallback) are visibly labeled with a disclaimer that they are AI-suggested, unverified, and may be inaccurate — distinct from the curated, hand-written steps for predefined providers (FR20g), which carry no such disclaimer.
 
 ### Theme
 - FR21. A user can toggle light/dark theme from any page; the choice persists across page loads and sessions in that browser (`localStorage`).
@@ -55,7 +58,7 @@ Companion to [prd.md](prd.md) (the why) — this is the concrete, testable *what
 
 - NFR1. **No real outbound calls.** Nudges, outbound tracker sync, and transcript-source checks must not, under any configuration, make an outbound network request to a third-party service. This is a hard constraint, not a default — it protects against accidental misuse of credentials entered into a prototype. The one deliberate exception is the *inbound* tracker webhook (FR20a): receiving a request needs no outbound call or credential of our own, so it's allowed to be real while every push direction stays mocked.
 - NFR2. **No paid tier.** No UI copy, gating, or backend logic may imply a subscription, trial, or paywall.
-- NFR3. **Zero external dependencies to run.** `pip install flask` and `python app.py` must be sufficient — no cloud account, no API keys, no build step.
+- NFR3. **Zero external dependencies to run.** `pip install flask` and `python app.py` must be sufficient — no cloud account, no API keys, no build step. The one opt-in exception is FR20i's AI-suggested setup steps for a Custom app: if an `ANTHROPIC_API_KEY` environment variable is set, that one feature makes a real outbound call to generate app-specific steps; without it, the app runs identically and that feature just falls back to a generic template.
 - NFR4. **Platform-neutral.** No code or copy should assume a specific hosting provider or a specific AI-assistant platform (ChatGPT vs. Claude vs. other) until that decision is made.
 - NFR5. Pages must render legibly in both light and dark themes, meeting basic contrast expectations (validated for the status-chart palette specifically).
 - NFR6. The app is single-instance/local-scale — no requirement for concurrent-user performance, since it isn't deployed anywhere yet.

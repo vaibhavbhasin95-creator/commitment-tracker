@@ -62,6 +62,7 @@
                             <option value="slack">Slack</option>
                             <option value="teams">Microsoft Teams</option>
                             <option value="email">Email</option>
+                            <option value="custom">Custom app…</option>
                         </select>
                     </div>
 
@@ -90,6 +91,15 @@
                             <li>Paste that key into the field below.</li>
                         </ol>
                     </details>
+
+                    <div id="channel-custom-block" style="display:none;">
+                        <div>
+                            <label for="custom-channel-name">App name</label>
+                            <input type="text" id="custom-channel-name" placeholder="e.g. Discord, Telegram, PagerDuty">
+                        </div>
+                        <button type="button" class="btn secondary" id="suggest-channel-steps-btn" style="margin-top:10px;">Suggest setup steps (AI)</button>
+                        <div id="channel-ai-steps" style="margin-top:10px;"></div>
+                    </div>
 
                     <div>
                         <label for="webhook">Webhook URL / API key</label>
@@ -131,6 +141,7 @@
                             <option value="none">None — use built-in tracking</option>
                             <option value="jira">Jira</option>
                             <option value="google_sheets">Google Sheets</option>
+                            <option value="custom">Custom app…</option>
                         </select>
                     </div>
 
@@ -183,6 +194,23 @@
                         </div>
                     </div>
 
+                    <div id="tracker-fields-custom" class="tracker-fields" style="display:none;">
+                        <div>
+                            <label for="tracker-custom-name">App name</label>
+                            <input type="text" id="tracker-custom-name" placeholder="e.g. Linear, Asana, Trello">
+                        </div>
+                        <button type="button" class="btn secondary" id="suggest-tracker-steps-btn" style="justify-self:start;">Suggest setup steps (AI)</button>
+                        <div id="tracker-ai-steps"></div>
+                        <div>
+                            <label for="tracker-custom-endpoint">Endpoint / base URL</label>
+                            <input type="text" id="tracker-custom-endpoint" placeholder="https://api.example.com">
+                        </div>
+                        <div>
+                            <label for="tracker-custom-api-key">API key</label>
+                            <input type="text" id="tracker-custom-api-key" placeholder="API key or token">
+                        </div>
+                    </div>
+
                     <div>
                         <label><input type="checkbox" id="tracker-enabled" checked style="width:auto; margin-right:6px;">Enabled</label>
                     </div>
@@ -228,6 +256,7 @@
                             <option value="google_meet">Google Meet</option>
                             <option value="teams">Microsoft Teams</option>
                             <option value="otter">Otter.ai</option>
+                            <option value="custom">Custom app…</option>
                         </select>
                     </div>
 
@@ -310,6 +339,23 @@
                         </div>
                     </div>
 
+                    <div id="transcript-fields-custom" class="tracker-fields" style="display:none;">
+                        <div>
+                            <label for="transcript-custom-name">App name</label>
+                            <input type="text" id="transcript-custom-name" placeholder="e.g. Fireflies.ai, Fathom">
+                        </div>
+                        <button type="button" class="btn secondary" id="suggest-transcript-steps-btn" style="justify-self:start;">Suggest setup steps (AI)</button>
+                        <div id="transcript-ai-steps"></div>
+                        <div>
+                            <label for="transcript-custom-identifier">Account / workspace identifier</label>
+                            <input type="text" id="transcript-custom-identifier" placeholder="you@company.com or workspace ID">
+                        </div>
+                        <div>
+                            <label for="transcript-custom-api-key">API key</label>
+                            <input type="text" id="transcript-custom-api-key" placeholder="API key or token">
+                        </div>
+                    </div>
+
                     <div>
                         <label><input type="checkbox" id="transcript-enabled" checked style="width:auto; margin-right:6px;">Enabled</label>
                     </div>
@@ -343,7 +389,7 @@ async function loadSettings() {
     list.innerHTML = rows.map(r => `
         <div class="saved-settings-item">
             <div>
-                <div class="chan">${r.channel}</div>
+                <div class="chan">${r.channel === "custom" ? (r.custom_name || "Custom") : r.channel}</div>
                 <div class="cadence">${CADENCE_LABELS[r.cadence]} · ${r.enabled ? "enabled" : "disabled"}</div>
             </div>
             <div style="color:var(--text-faint); font-size:12px; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
@@ -353,8 +399,46 @@ async function loadSettings() {
     `).join("");
 }
 
-const TRACKER_LABELS = { none: "None", jira: "Jira", google_sheets: "Google Sheets" };
-const TRANSCRIPT_LABELS = { none: "None", zoom: "Zoom", google_meet: "Google Meet", teams: "Microsoft Teams", otter: "Otter.ai" };
+const TRACKER_LABELS = { none: "None", jira: "Jira", google_sheets: "Google Sheets", custom: "Custom" };
+const TRANSCRIPT_LABELS = { none: "None", zoom: "Zoom", google_meet: "Google Meet", teams: "Microsoft Teams", otter: "Otter.ai", custom: "Custom" };
+
+// ---------- AI-suggested setup steps (custom apps only) ----------
+
+function renderAiSteps(container, result) {
+    if (!result.steps || result.steps.length === 0) {
+        container.innerHTML = '<div style="color:var(--text-muted); font-size:13px;">No steps suggested.</div>';
+        return;
+    }
+    container.innerHTML = `
+        <div class="ai-steps-box">
+            <ol>${result.steps.map(s => `<li>${s}</li>`).join("")}</ol>
+            <div class="ai-disclaimer">${result.disclaimer}</div>
+        </div>
+    `;
+}
+
+function wireSuggestButton(buttonId, appNameInputId, containerId, category) {
+    const btn = document.getElementById(buttonId);
+    btn.addEventListener("click", async () => {
+        const appName = document.getElementById(appNameInputId).value.trim();
+        const container = document.getElementById(containerId);
+        if (!appName) {
+            toast("Enter an app name first");
+            return;
+        }
+        btn.disabled = true;
+        btn.textContent = "Asking AI…";
+        try {
+            const result = await api("/api/setup-steps/suggest", { method: "POST", body: { app_name: appName, category } });
+            renderAiSteps(container, result);
+        } catch (err) {
+            toast(err.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = "Suggest setup steps (AI)";
+        }
+    });
+}
 
 function showTrackerFields(provider) {
     document.querySelectorAll("#tracker-form .tracker-fields").forEach(el => { el.style.display = "none"; });
@@ -366,6 +450,7 @@ function showChannelHelp(channel) {
     document.querySelectorAll(".channel-help").forEach(el => { el.style.display = "none"; });
     const el = document.getElementById(`channel-help-${channel}`);
     if (el) el.style.display = "block";
+    document.getElementById("channel-custom-block").style.display = channel === "custom" ? "block" : "none";
 }
 
 function showTranscriptFields(provider) {
@@ -388,19 +473,26 @@ async function loadTrackerSettings() {
     } else if (t.provider === "google_sheets") {
         document.getElementById("sheets-id").value = t.config.spreadsheet_id || "";
         document.getElementById("sheets-api-key").value = t.config.api_key || "";
+    } else if (t.provider === "custom") {
+        document.getElementById("tracker-custom-name").value = t.custom_name || "";
+        document.getElementById("tracker-custom-endpoint").value = t.config.endpoint || "";
+        document.getElementById("tracker-custom-api-key").value = t.config.api_key || "";
     }
 
     const summary = document.getElementById("tracker-summary");
     if (t.provider === "none") {
         summary.innerHTML = '<div style="color:var(--text-muted); font-size:14px;">No tracker connected — commitments are tracked in this app only.</div>';
     } else {
+        const label = t.provider === "custom" ? (t.custom_name || "Custom") : TRACKER_LABELS[t.provider];
         const detail = t.provider === "jira"
             ? `${t.config.project_key || "?"} @ ${t.config.base_url || "?"}`
+            : t.provider === "custom"
+            ? `${t.config.endpoint || "?"}`
             : `Spreadsheet ${t.config.spreadsheet_id || "?"}`;
         summary.innerHTML = `
             <div class="saved-settings-item">
                 <div>
-                    <div class="chan">${TRACKER_LABELS[t.provider]}</div>
+                    <div class="chan">${label}</div>
                     <div class="cadence">${detail} · ${t.enabled ? "enabled" : "disabled"}</div>
                 </div>
             </div>
@@ -426,17 +518,22 @@ async function loadTranscriptSettings() {
     } else if (t.provider === "otter") {
         document.getElementById("otter-email").value = t.config.account_email || "";
         document.getElementById("otter-key").value = t.config.api_key || "";
+    } else if (t.provider === "custom") {
+        document.getElementById("transcript-custom-name").value = t.custom_name || "";
+        document.getElementById("transcript-custom-identifier").value = t.config.account_identifier || "";
+        document.getElementById("transcript-custom-api-key").value = t.config.api_key || "";
     }
 
     const summary = document.getElementById("transcript-summary");
     if (t.provider === "none") {
         summary.innerHTML = '<div style="color:var(--text-muted); font-size:14px;">No transcript source connected — upload transcripts by hand from the dashboard.</div>';
     } else {
-        const account = t.config.account_email || t.config.workspace_email || t.config.tenant_id || "?";
+        const label = t.provider === "custom" ? (t.custom_name || "Custom") : TRANSCRIPT_LABELS[t.provider];
+        const account = t.config.account_email || t.config.workspace_email || t.config.tenant_id || t.config.account_identifier || "?";
         summary.innerHTML = `
             <div class="saved-settings-item">
                 <div>
-                    <div class="chan">${TRANSCRIPT_LABELS[t.provider]}</div>
+                    <div class="chan">${label}</div>
                     <div class="cadence">${account} · ${t.enabled ? "enabled" : "disabled"}</div>
                 </div>
             </div>
@@ -471,14 +568,23 @@ async function init() {
         showChannelHelp(e.target.value);
     });
 
+    wireSuggestButton("suggest-channel-steps-btn", "custom-channel-name", "channel-ai-steps", "nudge");
+    wireSuggestButton("suggest-tracker-steps-btn", "tracker-custom-name", "tracker-ai-steps", "tracker");
+    wireSuggestButton("suggest-transcript-steps-btn", "transcript-custom-name", "transcript-ai-steps", "transcript");
+
     document.getElementById("settings-form").addEventListener("submit", async (e) => {
         e.preventDefault();
         const channel = document.getElementById("channel").value;
+        const custom_name = document.getElementById("custom-channel-name").value.trim();
         const webhook_or_key = document.getElementById("webhook").value.trim();
         const cadence = document.getElementById("cadence").value;
         const enabled = document.getElementById("enabled").checked;
+        if (channel === "custom" && !custom_name) {
+            toast("Enter an app name for the custom channel");
+            return;
+        }
         try {
-            await api("/api/nudge-settings", { method: "POST", body: { channel, webhook_or_key, cadence, enabled } });
+            await api("/api/nudge-settings", { method: "POST", body: { channel, custom_name, webhook_or_key, cadence, enabled } });
             toast("Channel saved");
             document.getElementById("webhook").value = "";
             await loadSettings();
@@ -495,6 +601,7 @@ async function init() {
         e.preventDefault();
         const provider = document.getElementById("tracker-provider").value;
         let config = {};
+        let custom_name = "";
         if (provider === "jira") {
             config = {
                 base_url: document.getElementById("jira-base-url").value.trim(),
@@ -507,10 +614,20 @@ async function init() {
                 spreadsheet_id: document.getElementById("sheets-id").value.trim(),
                 api_key: document.getElementById("sheets-api-key").value.trim(),
             };
+        } else if (provider === "custom") {
+            custom_name = document.getElementById("tracker-custom-name").value.trim();
+            config = {
+                endpoint: document.getElementById("tracker-custom-endpoint").value.trim(),
+                api_key: document.getElementById("tracker-custom-api-key").value.trim(),
+            };
+            if (!custom_name) {
+                toast("Enter an app name for the custom tracker");
+                return;
+            }
         }
         const enabled = document.getElementById("tracker-enabled").checked;
         try {
-            await api("/api/tracker-settings", { method: "POST", body: { provider, config, enabled } });
+            await api("/api/tracker-settings", { method: "POST", body: { provider, custom_name, config, enabled } });
             toast("Tracker saved");
             await loadTrackerSettings();
         } catch (err) {
@@ -526,6 +643,7 @@ async function init() {
         e.preventDefault();
         const provider = document.getElementById("transcript-provider").value;
         let config = {};
+        let custom_name = "";
         if (provider === "zoom") {
             config = {
                 account_email: document.getElementById("zoom-email").value.trim(),
@@ -546,10 +664,20 @@ async function init() {
                 account_email: document.getElementById("otter-email").value.trim(),
                 api_key: document.getElementById("otter-key").value.trim(),
             };
+        } else if (provider === "custom") {
+            custom_name = document.getElementById("transcript-custom-name").value.trim();
+            config = {
+                account_identifier: document.getElementById("transcript-custom-identifier").value.trim(),
+                api_key: document.getElementById("transcript-custom-api-key").value.trim(),
+            };
+            if (!custom_name) {
+                toast("Enter an app name for the custom transcript source");
+                return;
+            }
         }
         const enabled = document.getElementById("transcript-enabled").checked;
         try {
-            await api("/api/transcript-source-settings", { method: "POST", body: { provider, config, enabled } });
+            await api("/api/transcript-source-settings", { method: "POST", body: { provider, custom_name, config, enabled } });
             toast("Transcript source saved");
             await loadTranscriptSettings();
         } catch (err) {

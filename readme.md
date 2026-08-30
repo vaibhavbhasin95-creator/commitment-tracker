@@ -15,9 +15,10 @@ Prototype. Free to use, no account system beyond an email address, no payment an
 - **Manual transcript upload**: since the real parser isn't wired in yet, paste or upload a `.txt` transcript to create a meeting, then add its commitments by hand from the meeting detail view. This path is fully real — nothing here is mocked.
 - **Commitment detail modal**: source quote, owner, due date, extraction confidence (blank for hand-entered commitments), status control, nudge history, and task-tracker sync history (both directions).
 - **Integrations page**:
-  - *Nudges* — per-user Slack / Teams / email webhook or API key, cadence (day-before / on-due / daily-once-overdue). "Send test nudge" logs an entry; nothing is sent. Each channel has "how to get these details" steps.
-  - *Task tracker* — connect Jira or Google Sheets (or neither), with setup steps for each. Outbound "Sync to tracker" logs what *would* be sent and mints an `external_ref` (e.g. a fake Jira issue key). See two-way sync below.
-  - *Transcript source* — configure which app (Zoom / Google Meet / Microsoft Teams / Otter.ai) transcripts would come from, with setup steps for each. "Check for new transcripts" logs what would happen — there's no parser yet to act on a fetched transcript, so this is illustrative until that's wired in. Not configuring one is fine; upload transcripts by hand instead.
+  - *Nudges* — per-user Slack / Teams / email / custom webhook or API key, cadence (day-before / on-due / daily-once-overdue). "Send test nudge" logs an entry; nothing is sent. Each channel has "how to get these details" steps.
+  - *Task tracker* — connect Jira, Google Sheets, or a custom app (or neither), with setup steps for each. Outbound "Sync to tracker" logs what *would* be sent and mints an `external_ref` (e.g. a fake Jira issue key). See two-way sync below.
+  - *Transcript source* — configure which app (Zoom / Google Meet / Microsoft Teams / Otter.ai / custom) transcripts would come from, with setup steps for each. "Check for new transcripts" logs what would happen — there's no parser yet to act on a fetched transcript, so this is illustrative until that's wired in. Not configuring one is fine; upload transcripts by hand instead.
+  - *Custom apps* — if a provider isn't in the predefined list, pick "Custom" in any of the three sections above and name your own app. Its "how to get these details" steps aren't hand-written; they're suggested by a live AI call (`/api/setup-steps/suggest`) and always shown with a disclaimer that they're unverified. Set `ANTHROPIC_API_KEY` as an environment variable to enable the real call — without it, a generic template list is shown instead (still disclaimed).
 - **Two-way tracker sync**: outbound push is mocked (logged only), but `POST /api/webhooks/tracker-update` is a *real, functional* inbound endpoint — point a Jira Automation rule or a Google Apps Script trigger at it and a status change made there updates the matching commitment here. No outbound call is needed to receive a webhook, so this half is safe to make real even while push stays mocked. A "Simulate update from tracker" button in the commitment modal exercises the same path without needing a live external caller.
 - **Light/dark theme** toggle, persisted per browser, no flash of the wrong theme on load.
 - **Demo data**: a "Load demo meeting" button seeds two sample meetings with realistic commitments so the app isn't empty on first look.
@@ -38,6 +39,8 @@ python app.py
 ```
 
 Open `http://localhost:5000`, enter any email address, and click **Load demo meeting** to populate sample data (or **Upload transcript** to add your own).
+
+Optionally, set `ANTHROPIC_API_KEY` before running to enable real AI-suggested setup steps for custom (user-defined) apps in Integrations — the app runs fine without it, falling back to a generic template.
 
 ## API overview
 
@@ -61,6 +64,7 @@ All routes except `/`, `/dashboard`, `/settings`, `/api/identify`, and the webho
 | `/api/transcript-source-settings` | GET / POST | Get / upsert which app transcripts come from |
 | `/api/transcript-source/check-now` | POST | Mock "check for new transcripts" — logs only |
 | `/api/transcript-source/log` | GET | Recent transcript-source check log |
+| `/api/setup-steps/suggest` | POST | AI-suggested (or template-fallback) setup steps for a custom app |
 
 ## Known limitations (by design, for now)
 

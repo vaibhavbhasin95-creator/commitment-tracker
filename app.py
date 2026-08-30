@@ -39,6 +39,14 @@ separately). Until there is, meetings and their commitments can be entered
 by hand via `POST /api/meetings` (paste/upload a transcript) and
 `POST /api/commitments` (add a commitment to it) — see readme.md.
 
+Each of the three settings sections (nudges, tracker, transcript source) also
+accepts a user-defined "custom" app, for when the predefined list doesn't
+cover what someone actually uses. Custom apps get generic credential fields
+(endpoint/webhook + API key) instead of provider-specific ones, and their
+"how to get these details" steps are suggested via `/api/setup-steps/suggest`
+instead of being hand-written — see that endpoint's docstring for how that
+degrades gracefully with no API key configured.
+
 Run:
     pip install flask
     python app.py
@@ -46,7 +54,11 @@ Then open http://localhost:5000 in a browser.
 """
 
 import json
+import os
+import re
 import sqlite3
+import urllib.error
+import urllib.request
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -70,6 +82,19 @@ def get_db():
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
         conn.executescript(SCHEMA_PATH.read_text())
+
+
+def migrate_db():
+    """Adds columns introduced after a user's local DB was first created.
+    SQLite has no 'ADD COLUMN IF NOT EXISTS', so check pragma table_info first."""
+    if not DB_PATH.exists():
+        return
+    with sqlite3.connect(DB_PATH) as conn:
+        for table in ("nudge_settings", "tracker_settings", "transcript_source_settings"):
+            cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+            if "custom_name" not in cols:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN custom_name TEXT")
+        conn.commit()
 
 
 def now_iso():
@@ -533,12 +558,15 @@ def save_nudge_settings():
 
     data = request.get_json(force=True)
     channel = data.get("channel")
+    custom_name = (data.get("custom_name") or "").strip() or None
     webhook_or_key = (data.get("webhook_or_key") or "").strip()
     cadence = data.get("cadence", "day_before")
     enabled = 1 if data.get("enabled", True) else 0
 
-    if channel not in ("slack", "teams", "email"):
-        return jsonify({"error": "channel must be one of slack, teams, email"}), 400
+    if channel not in ("slack", "teams", "email", "custom"):
+        return jsonify({"error": "channel must be one of slack, teams, email, custom"}), 400
+    if channel == "custom" and not custom_name:
+        return jsonify({"error": "custom_name is required for a custom channel"}), 400
     if not webhook_or_key:
         return jsonify({"error": "webhook_or_key is required"}), 400
     if cadence not in ("day_before", "on_due", "daily_after_overdue"):
@@ -546,11 +574,12 @@ def save_nudge_settings():
 
     db = get_db()
     db.execute(
-        "INSERT INTO nudge_settings (user_email, channel, webhook_or_key, cadence, enabled) "
-        "VALUES (?, ?, ?, ?, ?) "
+        "INSERT INTO nudge_settings (user_email, channel, custom_name, webhook_or_key, cadence, enabled) "
+        "VALUES (?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(user_email, channel) DO UPDATE SET "
-        "webhook_or_key = excluded.webhook_or_key, cadence = excluded.cadence, enabled = excluded.enabled",
-        (email, channel, webhook_or_key, cadence, enabled),
+        "custom_name = excluded.custom_name, webhook_or_key = excluded.webhook_or_key, "
+        "cadence = excluded.cadence, enabled = excluded.enabled",
+        (email, channel, custom_name, webhook_or_key, cadence, enabled),
     )
     db.commit()
     db.close()
@@ -562,6 +591,7 @@ def save_nudge_settings():
 TRACKER_REQUIRED_FIELDS = {
     "jira": ["base_url", "project_key", "email", "api_token"],
     "google_sheets": ["spreadsheet_id", "api_key"],
+    "custom": ["endpoint", "api_key"],
 }
 
 
@@ -572,13 +602,14 @@ def get_tracker_settings():
         return jsonify({"error": "not identified"}), 401
     db = get_db()
     row = db.execute(
-        "SELECT provider, config_json, enabled FROM tracker_settings WHERE user_email = ?", (email,)
+        "SELECT provider, custom_name, config_json, enabled FROM tracker_settings WHERE user_email = ?", (email,)
     ).fetchone()
     db.close()
     if row is None:
-        return jsonify({"provider": "none", "config": {}, "enabled": True})
+        return jsonify({"provider": "none", "custom_name": None, "config": {}, "enabled": True})
     return jsonify({
         "provider": row["provider"],
+        "custom_name": row["custom_name"],
         "config": json.loads(row["config_json"]),
         "enabled": bool(row["enabled"]),
     })
@@ -592,11 +623,14 @@ def save_tracker_settings():
 
     data = request.get_json(force=True)
     provider = data.get("provider", "none")
+    custom_name = (data.get("custom_name") or "").strip() or None
     config = data.get("config") or {}
     enabled = 1 if data.get("enabled", True) else 0
 
-    if provider not in ("none", "jira", "google_sheets"):
-        return jsonify({"error": "provider must be one of none, jira, google_sheets"}), 400
+    if provider not in ("none", "jira", "google_sheets", "custom"):
+        return jsonify({"error": "provider must be one of none, jira, google_sheets, custom"}), 400
+    if provider == "custom" and not custom_name:
+        return jsonify({"error": "custom_name is required for a custom tracker"}), 400
 
     if provider != "none":
         missing = [f for f in TRACKER_REQUIRED_FIELDS[provider] if not (config.get(f) or "").strip()]
@@ -605,11 +639,12 @@ def save_tracker_settings():
 
     db = get_db()
     db.execute(
-        "INSERT INTO tracker_settings (user_email, provider, config_json, enabled) "
-        "VALUES (?, ?, ?, ?) "
+        "INSERT INTO tracker_settings (user_email, provider, custom_name, config_json, enabled) "
+        "VALUES (?, ?, ?, ?, ?) "
         "ON CONFLICT(user_email) DO UPDATE SET "
-        "provider = excluded.provider, config_json = excluded.config_json, enabled = excluded.enabled",
-        (email, provider, json.dumps(config), enabled),
+        "provider = excluded.provider, custom_name = excluded.custom_name, "
+        "config_json = excluded.config_json, enabled = excluded.enabled",
+        (email, provider, custom_name, json.dumps(config), enabled),
     )
     db.commit()
     db.close()
@@ -631,7 +666,7 @@ def sync_tracker(commitment_id):
         return jsonify({"error": "not found"}), 404
 
     tracker = db.execute(
-        "SELECT provider, config_json, enabled FROM tracker_settings WHERE user_email = ?", (email,)
+        "SELECT provider, custom_name, config_json, enabled FROM tracker_settings WHERE user_email = ?", (email,)
     ).fetchone()
     if tracker is None or tracker["provider"] == "none" or not tracker["enabled"]:
         db.close()
@@ -641,19 +676,22 @@ def sync_tracker(commitment_id):
     config = json.loads(tracker["config_json"])
 
     # First sync mints a fake external reference (a real integration would get
-    # this back from the Jira/Sheets API call) so the inbound side has
+    # this back from the Jira/Sheets/custom API call) so the inbound side has
     # something to match a later status update against.
     external_ref = row["external_ref"]
     if not external_ref:
-        external_ref = (
-            f"{config.get('project_key', 'TASK')}-{commitment_id}"
-            if provider == "jira"
-            else f"row-{commitment_id}"
-        )
+        if provider == "jira":
+            external_ref = f"{config.get('project_key', 'TASK')}-{commitment_id}"
+        elif provider == "custom":
+            external_ref = f"ext-{commitment_id}"
+        else:
+            external_ref = f"row-{commitment_id}"
         db.execute("UPDATE commitments SET external_ref = ? WHERE id = ?", (external_ref, commitment_id))
 
     if provider == "jira":
         detail = f"Would create/update Jira issue {external_ref} in project {config.get('project_key')} at {config.get('base_url')}"
+    elif provider == "custom":
+        detail = f"Would send {external_ref} to {tracker['custom_name'] or 'your custom tracker'} at {config.get('endpoint')}"
     else:
         detail = f"Would write {external_ref} to Google Sheet {config.get('spreadsheet_id')}"
 
@@ -712,10 +750,13 @@ def simulate_inbound_update(commitment_id):
         return jsonify({"error": "sync to the tracker at least once first — nothing to simulate an update against yet"}), 400
 
     tracker = db.execute(
-        "SELECT provider FROM tracker_settings WHERE user_email = ?", (email,)
+        "SELECT provider, custom_name FROM tracker_settings WHERE user_email = ?", (email,)
     ).fetchone()
     provider = tracker["provider"] if tracker else "tracker"
-    label = {"jira": "Jira", "google_sheets": "Google Sheets"}.get(provider, provider)
+    if provider == "custom":
+        label = (tracker["custom_name"] if tracker else None) or "your custom tracker"
+    else:
+        label = {"jira": "Jira", "google_sheets": "Google Sheets"}.get(provider, provider)
 
     result, error = apply_inbound_tracker_update(db, commitment_id, new_status, provider, f"{label} (simulated)")
     if error:
@@ -775,6 +816,7 @@ TRANSCRIPT_SOURCE_REQUIRED_FIELDS = {
     "google_meet": ["workspace_email", "api_key"],
     "teams": ["tenant_id", "api_key"],
     "otter": ["account_email", "api_key"],
+    "custom": ["account_identifier", "api_key"],
 }
 TRANSCRIPT_SOURCE_LABELS = {
     "zoom": "Zoom", "google_meet": "Google Meet", "teams": "Microsoft Teams", "otter": "Otter.ai",
@@ -788,13 +830,14 @@ def get_transcript_source_settings():
         return jsonify({"error": "not identified"}), 401
     db = get_db()
     row = db.execute(
-        "SELECT provider, config_json, enabled FROM transcript_source_settings WHERE user_email = ?", (email,)
+        "SELECT provider, custom_name, config_json, enabled FROM transcript_source_settings WHERE user_email = ?", (email,)
     ).fetchone()
     db.close()
     if row is None:
-        return jsonify({"provider": "none", "config": {}, "enabled": True})
+        return jsonify({"provider": "none", "custom_name": None, "config": {}, "enabled": True})
     return jsonify({
         "provider": row["provider"],
+        "custom_name": row["custom_name"],
         "config": json.loads(row["config_json"]),
         "enabled": bool(row["enabled"]),
     })
@@ -808,11 +851,14 @@ def save_transcript_source_settings():
 
     data = request.get_json(force=True)
     provider = data.get("provider", "none")
+    custom_name = (data.get("custom_name") or "").strip() or None
     config = data.get("config") or {}
     enabled = 1 if data.get("enabled", True) else 0
 
-    if provider not in ("none", "zoom", "google_meet", "teams", "otter"):
-        return jsonify({"error": "provider must be one of none, zoom, google_meet, teams, otter"}), 400
+    if provider not in ("none", "zoom", "google_meet", "teams", "otter", "custom"):
+        return jsonify({"error": "provider must be one of none, zoom, google_meet, teams, otter, custom"}), 400
+    if provider == "custom" and not custom_name:
+        return jsonify({"error": "custom_name is required for a custom transcript source"}), 400
     if provider != "none":
         missing = [f for f in TRANSCRIPT_SOURCE_REQUIRED_FIELDS[provider] if not (config.get(f) or "").strip()]
         if missing:
@@ -820,11 +866,12 @@ def save_transcript_source_settings():
 
     db = get_db()
     db.execute(
-        "INSERT INTO transcript_source_settings (user_email, provider, config_json, enabled) "
-        "VALUES (?, ?, ?, ?) "
+        "INSERT INTO transcript_source_settings (user_email, provider, custom_name, config_json, enabled) "
+        "VALUES (?, ?, ?, ?, ?) "
         "ON CONFLICT(user_email) DO UPDATE SET "
-        "provider = excluded.provider, config_json = excluded.config_json, enabled = excluded.enabled",
-        (email, provider, json.dumps(config), enabled),
+        "provider = excluded.provider, custom_name = excluded.custom_name, "
+        "config_json = excluded.config_json, enabled = excluded.enabled",
+        (email, provider, custom_name, json.dumps(config), enabled),
     )
     db.commit()
     db.close()
@@ -843,7 +890,7 @@ def check_transcript_source():
 
     db = get_db()
     source = db.execute(
-        "SELECT provider, config_json, enabled FROM transcript_source_settings WHERE user_email = ?", (email,)
+        "SELECT provider, custom_name, config_json, enabled FROM transcript_source_settings WHERE user_email = ?", (email,)
     ).fetchone()
     if source is None or source["provider"] == "none" or not source["enabled"]:
         db.close()
@@ -851,8 +898,12 @@ def check_transcript_source():
 
     provider = source["provider"]
     config = json.loads(source["config_json"])
-    account = config.get("account_email") or config.get("workspace_email") or config.get("tenant_id") or "your account"
-    detail = f"Would check {TRANSCRIPT_SOURCE_LABELS[provider]} ({account}) for new meeting transcripts"
+    account = (
+        config.get("account_email") or config.get("workspace_email")
+        or config.get("tenant_id") or config.get("account_identifier") or "your account"
+    )
+    label = source["custom_name"] if provider == "custom" else TRANSCRIPT_SOURCE_LABELS[provider]
+    detail = f"Would check {label} ({account}) for new meeting transcripts"
 
     triggered_at = now_iso()
     db.execute(
@@ -878,8 +929,125 @@ def transcript_source_log():
     return jsonify([dict(r) for r in rows])
 
 
+# ---------- AI-suggested setup steps (custom, user-defined apps only) ----------
+#
+# The predefined providers above (Slack, Jira, Zoom, ...) have hand-written
+# "how to get these details" steps in the frontend. A custom app the user
+# types in has no such curated list, so this endpoint asks an LLM to guess a
+# plausible one instead. This is explicitly best-effort and unverified —
+# every response is labeled with a disclaimer, and the frontend renders it
+# distinctly from the curated provider steps.
+#
+# Kept optional so `pip install flask` + `python app.py` still works with no
+# API key (NFR3): if ANTHROPIC_API_KEY isn't set, or the call fails for any
+# reason, a generic template list is returned instead — still disclaimed,
+# just less specific. No new pip dependency is added; the call is made with
+# the stdlib (urllib) rather than the anthropic package.
+
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
+
+SETUP_STEPS_CATEGORY_CONTEXT = {
+    "nudge": "sending automated nudge/reminder notifications (like a Slack or Teams webhook)",
+    "tracker": "syncing tasks/issues to and from an external task tracker (like Jira or a spreadsheet)",
+    "transcript": "fetching meeting transcripts from a video-call or note-taking app (like Zoom or Otter.ai)",
+}
+
+AI_STEPS_DISCLAIMER = (
+    "These setup steps are AI-generated, not verified by us, and may be inaccurate or "
+    "out of date for this specific app. Double-check them against the app's own "
+    "documentation before entering any credentials."
+)
+
+
+def _template_setup_steps(app_name, category):
+    """Generic fallback used when no ANTHROPIC_API_KEY is configured, or the
+    live call fails for any reason."""
+    context = SETUP_STEPS_CATEGORY_CONTEXT.get(category, "connecting this app")
+    return [
+        f"Log in to {app_name} and look for a \"Settings\", \"Developer\", \"Integrations\", or \"API\" section.",
+        f"Look for a way to create a webhook URL or an API key/token intended for {context}.",
+        "Give the credential a descriptive name and the narrowest scope/permissions available.",
+        f"Copy the generated URL or key and paste it into the field below — {app_name} won't show it again.",
+        "Save here, then use the section's test/check action to confirm it's wired up.",
+    ]
+
+
+def _ai_setup_steps(app_name, category):
+    """Returns a list of steps from a live Claude call, or None on any failure
+    (missing key, network error, bad response shape, etc.) so the caller can
+    fall back to the template list."""
+    if not ANTHROPIC_API_KEY:
+        return None
+
+    context = SETUP_STEPS_CATEGORY_CONTEXT.get(category, "connecting this app to another tool")
+    prompt = (
+        f"A user wants to connect a third-party app called \"{app_name}\" to their own tool, "
+        f"for the purpose of {context}. List 3-6 short, concrete steps for where in {app_name} "
+        "they'd typically find or generate the webhook URL / API key they'd need. "
+        "Reply with ONLY a plain numbered list, one short step per line, no preamble, "
+        "no markdown formatting, no closing remarks. If you aren't confident about this "
+        "specific app, give your best generic guess for a typical SaaS app instead of refusing."
+    )
+
+    body = json.dumps({
+        "model": ANTHROPIC_MODEL,
+        "max_tokens": 400,
+        "messages": [{"role": "user", "content": prompt}],
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        ANTHROPIC_MESSAGES_URL,
+        data=body,
+        method="POST",
+        headers={
+            "content-type": "application/json",
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        text = "".join(block.get("text", "") for block in payload.get("content", []))
+        steps = []
+        for line in text.splitlines():
+            cleaned = re.sub(r"^\s*(?:[-*]|\d+[.)])\s*", "", line).strip()
+            if cleaned:
+                steps.append(cleaned)
+        return steps or None
+    except (urllib.error.URLError, TimeoutError, ValueError, KeyError, OSError):
+        return None
+
+
+@app.route("/api/setup-steps/suggest", methods=["POST"])
+def suggest_setup_steps():
+    email = require_email()
+    if not email:
+        return jsonify({"error": "not identified"}), 401
+
+    data = request.get_json(force=True)
+    app_name = (data.get("app_name") or "").strip()
+    category = data.get("category")
+
+    if category not in SETUP_STEPS_CATEGORY_CONTEXT:
+        return jsonify({"error": "category must be one of nudge, tracker, transcript"}), 400
+    if not app_name:
+        return jsonify({"error": "app_name is required"}), 400
+
+    steps = _ai_setup_steps(app_name, category)
+    source = "ai"
+    if steps is None:
+        steps = _template_setup_steps(app_name, category)
+        source = "template"
+
+    return jsonify({"steps": steps, "source": source, "disclaimer": AI_STEPS_DISCLAIMER})
+
+
 if __name__ == "__main__":
     if not DB_PATH.exists():
         init_db()
         print(f"Initialized new database at {DB_PATH}")
+    migrate_db()
     app.run(debug=True, port=5000)

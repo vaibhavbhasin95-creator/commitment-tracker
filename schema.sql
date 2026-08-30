@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS commitments (
 CREATE TABLE IF NOT EXISTS nudge_settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_email TEXT NOT NULL,
-    channel TEXT NOT NULL,                       -- 'slack' | 'teams' | 'email'
+    channel TEXT NOT NULL,                       -- 'slack' | 'teams' | 'email' | 'custom'
+    custom_name TEXT,                            -- user-supplied app name, only set when channel = 'custom'
     webhook_or_key TEXT NOT NULL,
     cadence TEXT NOT NULL DEFAULT 'day_before',   -- 'day_before' | 'on_due' | 'daily_after_overdue'
     enabled INTEGER NOT NULL DEFAULT 1,
@@ -54,7 +55,8 @@ CREATE TABLE IF NOT EXISTS nudge_log (
 CREATE TABLE IF NOT EXISTS tracker_settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_email TEXT NOT NULL UNIQUE,
-    provider TEXT NOT NULL DEFAULT 'none',        -- 'none' | 'jira' | 'google_sheets'
+    provider TEXT NOT NULL DEFAULT 'none',        -- 'none' | 'jira' | 'google_sheets' | 'custom'
+    custom_name TEXT,                             -- user-supplied app name, only set when provider = 'custom'
     config_json TEXT NOT NULL DEFAULT '{}',
     enabled INTEGER NOT NULL DEFAULT 1
 );
@@ -76,7 +78,8 @@ CREATE TABLE IF NOT EXISTS tracker_sync_log (
 CREATE TABLE IF NOT EXISTS transcript_source_settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_email TEXT NOT NULL UNIQUE,
-    provider TEXT NOT NULL DEFAULT 'none',         -- 'none' | 'zoom' | 'google_meet' | 'teams' | 'otter'
+    provider TEXT NOT NULL DEFAULT 'none',         -- 'none' | 'zoom' | 'google_meet' | 'teams' | 'otter' | 'custom'
+    custom_name TEXT,                              -- user-supplied app name, only set when provider = 'custom'
     config_json TEXT NOT NULL DEFAULT '{}',
     enabled INTEGER NOT NULL DEFAULT 1
 );
