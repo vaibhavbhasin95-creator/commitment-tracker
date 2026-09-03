@@ -12,8 +12,9 @@ CREATE TABLE IF NOT EXISTS meetings (
     title TEXT NOT NULL,
     meeting_date TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    source TEXT NOT NULL DEFAULT 'generated',   -- 'upload' | 'generated'
-    transcript_excerpt TEXT
+    source TEXT NOT NULL DEFAULT 'generated',   -- 'upload' | 'generated' | 'live'
+    transcript_excerpt TEXT,
+    transcript_provider TEXT                    -- which app delivered it live (e.g. 'zoom'), NULL unless source='live'
 );
 
 CREATE TABLE IF NOT EXISTS commitments (
@@ -73,22 +74,26 @@ CREATE TABLE IF NOT EXISTS tracker_sync_log (
 
 -- Where the transcript itself is expected to come from. Separate from
 -- tracker_settings (that's where *tasks* go out to; this is where the
--- *transcript* comes in from). Also mocked — "check now" just logs what
--- would happen — since the real parsing engine isn't wired in yet.
+-- *transcript* comes in from). "Check now" is still mocked, but Zoom /
+-- Google Meet / Teams also support a real, live push via a per-user
+-- webhook_token (see /api/webhooks/... routes) once connected.
 CREATE TABLE IF NOT EXISTS transcript_source_settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_email TEXT NOT NULL UNIQUE,
     provider TEXT NOT NULL DEFAULT 'none',         -- 'none' | 'zoom' | 'google_meet' | 'teams' | 'otter' | 'custom'
     custom_name TEXT,                              -- user-supplied app name, only set when provider = 'custom'
     config_json TEXT NOT NULL DEFAULT '{}',
-    enabled INTEGER NOT NULL DEFAULT 1
+    enabled INTEGER NOT NULL DEFAULT 1,
+    webhook_token TEXT UNIQUE                      -- identifies this user in inbound capture webhook URLs; generated on first save
 );
 
 CREATE TABLE IF NOT EXISTS transcript_sync_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_email TEXT NOT NULL,
     provider TEXT NOT NULL,
+    direction TEXT NOT NULL DEFAULT 'outbound',    -- 'outbound' (we checked/pulled) | 'inbound' (a provider pushed a transcript to us)
     triggered_at TEXT NOT NULL,
-    status TEXT NOT NULL,                          -- 'mock_checked'
-    detail TEXT
+    status TEXT NOT NULL,                          -- 'mock_checked' | 'received'
+    detail TEXT,
+    meeting_id INTEGER REFERENCES meetings(id)     -- set for inbound entries that created a meeting; NULL for a mock "check now"
 );

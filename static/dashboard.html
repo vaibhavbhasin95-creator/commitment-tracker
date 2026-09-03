@@ -256,6 +256,9 @@
 <script>
 let currentCommitmentId = null;
 let allCommitments = [];
+let knownMeetingIds = null;
+let newMeetingIds = new Set();
+const MEETING_POLL_INTERVAL_MS = 8000;
 
 function renderMeetings(meetings) {
     const list = document.getElementById("meetings-list");
@@ -264,9 +267,10 @@ function renderMeetings(meetings) {
         return;
     }
     list.innerHTML = meetings.map(m => `
-        <div class="meeting-chip meeting-chip-clickable" data-id="${m.id}">
+        <div class="meeting-chip meeting-chip-clickable${newMeetingIds.has(m.id) ? " meeting-chip-new" : ""}" data-id="${m.id}">
             <strong>${escapeHtml(m.title)}</strong>
             <span class="meeting-date"> · ${formatDate(m.meeting_date)} · ${m.source}</span>
+            ${m.source === "live" ? `<span class="badge live-capture">Live capture${m.transcript_provider ? " · " + escapeHtml(m.transcript_provider) : ""}</span>` : ""}
         </div>
     `).join("");
     list.querySelectorAll(".meeting-chip").forEach(chip => {
@@ -342,12 +346,6 @@ function renderStatusSummary(commitments) {
         .join("");
 }
 
-function escapeHtml(str) {
-    const div = document.createElement("div");
-    div.textContent = str == null ? "" : str;
-    return div.innerHTML;
-}
-
 async function loadCommitments() {
     const status = document.getElementById("filter-status").value;
     const owner = document.getElementById("filter-owner").value;
@@ -360,11 +358,35 @@ async function loadCommitments() {
 
 async function loadAll() {
     const meetings = await api("/api/meetings");
+
+    if (knownMeetingIds === null) {
+        knownMeetingIds = new Set(meetings.map(m => m.id));
+        newMeetingIds = new Set();
+    } else {
+        const arrivedLive = meetings.filter(m => m.source === "live" && !knownMeetingIds.has(m.id));
+        if (arrivedLive.length > 0) {
+            toast(arrivedLive.length === 1
+                ? `New meeting captured live: "${arrivedLive[0].title}"`
+                : `${arrivedLive.length} new meetings captured live`);
+        }
+        newMeetingIds = new Set(arrivedLive.map(m => m.id));
+        knownMeetingIds = new Set(meetings.map(m => m.id));
+    }
+
     renderMeetings(meetings);
     const unfiltered = await api("/api/commitments");
     populateOwnerFilter(unfiltered);
     renderStatusSummary(unfiltered);
     await loadCommitments();
+}
+
+function startMeetingPolling() {
+    setInterval(() => {
+        if (document.visibilityState === "visible") loadAll();
+    }, MEETING_POLL_INTERVAL_MS);
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") loadAll();
+    });
 }
 
 async function openModal(id) {
@@ -463,6 +485,7 @@ async function init() {
     await requireIdentified();
     await initNav();
     await loadAll();
+    startMeetingPolling();
 
     document.getElementById("filter-status").addEventListener("change", loadCommitments);
     document.getElementById("filter-owner").addEventListener("change", loadCommitments);

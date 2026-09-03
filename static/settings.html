@@ -240,9 +240,11 @@
 
             <h2 class="page-heading" style="margin-top:44px;">Transcript source</h2>
             <div class="mock-notice">
-                Also a prototype: "check now" is simulated — no real Zoom/Meet/Teams/Otter call is made, and
-                there's no parser here yet to turn a transcript into commitments (that's being built separately).
-                Whatever you pick here, you can always upload a transcript by hand from the dashboard.
+                "Check now" is still simulated. Once a source below is connected, a real automation can also
+                push a transcript straight into this app the moment a meeting ends — see the webhook box below.
+                No parser is wired in yet, so it lands as an unprocessed transcript (same as an upload), with
+                commitments still added by hand. Whatever you pick here, you can always upload a transcript
+                manually from the dashboard.
             </div>
 
             <div class="card">
@@ -264,19 +266,27 @@
                         <details class="help-steps">
                             <summary>How to get your Zoom details</summary>
                             <ol>
-                                <li>Go to the <a href="https://marketplace.zoom.us" target="_blank" rel="noopener">Zoom App Marketplace</a> and sign in.</li>
-                                <li>Under "Develop", build (or use) a Server-to-Server OAuth app.</li>
+                                <li>Go to the <a href="https://marketplace.zoom.us" target="_blank" rel="noopener">Zoom App Marketplace</a> and sign in with the Zoom account whose meetings you want captured.</li>
+                                <li>Under "Develop", build a <strong>Server-to-Server OAuth</strong> app. Copy its Account ID, Client ID, and Client Secret into the fields below.</li>
                                 <li>Grant it the <code style="display:inline;padding:1px 4px;">cloud_recording:read</code> scope so it can read meeting transcripts.</li>
-                                <li>Enter your Zoom account email and the app's credentials below.</li>
+                                <li>Add an event subscription for <code style="display:inline;padding:1px 4px;">recording.transcript_completed</code>, set a Secret Token for it (paste that below too), and — once you've saved this form — point its Event notification endpoint URL at the webhook URL shown further down this page.</li>
                             </ol>
                         </details>
                         <div>
-                            <label for="zoom-email">Account email</label>
-                            <input type="email" id="zoom-email" placeholder="you@company.com">
+                            <label for="zoom-account-id">Account ID</label>
+                            <input type="text" id="zoom-account-id" placeholder="Zoom account ID">
                         </div>
                         <div>
-                            <label for="zoom-key">API key</label>
-                            <input type="text" id="zoom-key" placeholder="Zoom app credentials">
+                            <label for="zoom-client-id">Client ID</label>
+                            <input type="text" id="zoom-client-id" placeholder="Server-to-Server OAuth app client ID">
+                        </div>
+                        <div>
+                            <label for="zoom-client-secret">Client secret</label>
+                            <input type="text" id="zoom-client-secret" placeholder="Server-to-Server OAuth app client secret">
+                        </div>
+                        <div>
+                            <label for="zoom-webhook-secret">Webhook secret token</label>
+                            <input type="text" id="zoom-webhook-secret" placeholder="From the app's event subscription">
                         </div>
                     </div>
 
@@ -363,9 +373,30 @@
                 </form>
             </div>
 
+            <div class="webhook-box">
+                <strong>Live capture:</strong> once a source above is saved and enabled, a real "meeting ended"
+                automation (Zoom's event subscription, or your own script for a Custom app) can push the
+                transcript straight into this app instead of waiting on "check now". Point it at:
+                <code id="capture-webhook-url">POST /api/webhooks/transcript-capture/…</code>
+                <div style="margin-top:6px;">Body (for a generic/Custom push):</div>
+                <code>{ "title": "Weekly Standup", "meeting_date": "2026-09-03", "transcript_excerpt": "..." }</code>
+                <div style="margin-top:8px; display:flex; align-items:center; gap:10px;">
+                    <button type="button" class="btn secondary" id="copy-webhook-url-btn" style="padding:4px 12px; font-size:12.5px;">Copy URL</button>
+                    <button type="button" class="btn secondary" id="regenerate-token-btn" style="padding:4px 12px; font-size:12.5px;">Regenerate token</button>
+                </div>
+                <div style="margin-top:8px; color:var(--text-faint); font-size:12px;">
+                    Honest caveat: this only works once this app is reachable at a public HTTPS URL a real
+                    automation can call — it's <code style="display:inline;padding:1px 4px;">localhost</code>-only
+                    today. Use "Simulate incoming transcript" below to try the flow without one.
+                </div>
+            </div>
+
             <div class="toolbar" style="margin-top:20px; margin-bottom:0;">
                 <div class="section-title" style="margin-bottom:0;">Current source</div>
-                <button class="btn secondary" id="check-transcript-btn">Check for new transcripts</button>
+                <div style="display:flex; gap:10px;">
+                    <button class="btn secondary" id="check-transcript-btn">Check for new transcripts</button>
+                    <button class="btn secondary" id="simulate-capture-btn">Simulate incoming transcript</button>
+                </div>
             </div>
             <div class="saved-settings" style="margin-top:12px;">
                 <div id="transcript-summary"></div>
@@ -500,15 +531,27 @@ async function loadTrackerSettings() {
     }
 }
 
+let currentWebhookToken = null;
+
+function renderCaptureWebhookUrl() {
+    const url = `${window.location.origin}/api/webhooks/transcript-capture/${currentWebhookToken}`;
+    document.getElementById("capture-webhook-url").textContent = `POST ${url}`;
+    return url;
+}
+
 async function loadTranscriptSettings() {
     const t = await api("/api/transcript-source-settings");
     document.getElementById("transcript-provider").value = t.provider;
     document.getElementById("transcript-enabled").checked = t.enabled;
     showTranscriptFields(t.provider);
+    currentWebhookToken = t.webhook_token;
+    renderCaptureWebhookUrl();
 
     if (t.provider === "zoom") {
-        document.getElementById("zoom-email").value = t.config.account_email || "";
-        document.getElementById("zoom-key").value = t.config.api_key || "";
+        document.getElementById("zoom-account-id").value = t.config.account_id || "";
+        document.getElementById("zoom-client-id").value = t.config.client_id || "";
+        document.getElementById("zoom-client-secret").value = t.config.client_secret || "";
+        document.getElementById("zoom-webhook-secret").value = t.config.webhook_secret_token || "";
     } else if (t.provider === "google_meet") {
         document.getElementById("meet-email").value = t.config.workspace_email || "";
         document.getElementById("meet-key").value = t.config.api_key || "";
@@ -529,7 +572,7 @@ async function loadTranscriptSettings() {
         summary.innerHTML = '<div style="color:var(--text-muted); font-size:14px;">No transcript source connected — upload transcripts by hand from the dashboard.</div>';
     } else {
         const label = t.provider === "custom" ? (t.custom_name || "Custom") : TRANSCRIPT_LABELS[t.provider];
-        const account = t.config.account_email || t.config.workspace_email || t.config.tenant_id || t.config.account_identifier || "?";
+        const account = t.config.account_id || t.config.account_email || t.config.workspace_email || t.config.tenant_id || t.config.account_identifier || "?";
         summary.innerHTML = `
             <div class="saved-settings-item">
                 <div>
@@ -550,8 +593,11 @@ async function loadTranscriptLog() {
         logEl.innerHTML = "";
         return;
     }
-    logEl.innerHTML = `<div class="cadence" style="margin-bottom:6px;">Recent checks</div>` + rows.map(r => `
-        <div class="nudge-history-item">${formatDateTime(r.triggered_at)} — ${r.detail}</div>
+    logEl.innerHTML = `<div class="cadence" style="margin-bottom:6px;">Recent activity</div>` + rows.map(r => `
+        <div class="nudge-history-item">
+            ${r.direction === "inbound" ? "↓ pushed to us" : "↑ we checked"} · ${formatDateTime(r.triggered_at)} — ${escapeHtml(r.detail)}
+            ${r.meeting_title ? `<span class="badge status-in_progress" style="margin-left:6px;">→ ${escapeHtml(r.meeting_title)}</span>` : ""}
+        </div>
     `).join("");
 }
 
@@ -646,8 +692,10 @@ async function init() {
         let custom_name = "";
         if (provider === "zoom") {
             config = {
-                account_email: document.getElementById("zoom-email").value.trim(),
-                api_key: document.getElementById("zoom-key").value.trim(),
+                account_id: document.getElementById("zoom-account-id").value.trim(),
+                client_id: document.getElementById("zoom-client-id").value.trim(),
+                client_secret: document.getElementById("zoom-client-secret").value.trim(),
+                webhook_secret_token: document.getElementById("zoom-webhook-secret").value.trim(),
             };
         } else if (provider === "google_meet") {
             config = {
@@ -690,6 +738,37 @@ async function init() {
             await api("/api/transcript-source/check-now", { method: "POST" });
             toast("Checked (mock — nothing was actually fetched)");
             await loadTranscriptLog();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    document.getElementById("simulate-capture-btn").addEventListener("click", async () => {
+        try {
+            await api("/api/meetings/simulate-incoming-capture", { method: "POST" });
+            toast("Simulated an incoming live transcript — check the dashboard");
+            await loadTranscriptLog();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    document.getElementById("copy-webhook-url-btn").addEventListener("click", async () => {
+        const url = renderCaptureWebhookUrl();
+        try {
+            await navigator.clipboard.writeText(url);
+            toast("Webhook URL copied");
+        } catch (err) {
+            toast("Couldn't copy — select the URL above manually");
+        }
+    });
+
+    document.getElementById("regenerate-token-btn").addEventListener("click", async () => {
+        try {
+            const result = await api("/api/transcript-source/regenerate-token", { method: "POST" });
+            currentWebhookToken = result.webhook_token;
+            renderCaptureWebhookUrl();
+            toast("Webhook token regenerated — update any automation pointed at the old URL");
         } catch (err) {
             toast(err.message);
         }

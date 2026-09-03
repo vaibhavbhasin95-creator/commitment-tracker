@@ -35,6 +35,12 @@ function formatDate(iso) {
     return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
+function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str == null ? "" : str;
+    return div.innerHTML;
+}
+
 function formatDateTime(iso) {
     if (!iso) return "—";
     const d = new Date(iso + (iso.endsWith("Z") ? "" : "Z"));

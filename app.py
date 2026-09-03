@@ -31,13 +31,19 @@ safe to make real even while the push direction stays mocked.
 `simulate-inbound-update` exercises the same code path from the UI, so the
 round trip is demonstrable without a live external caller.
 
-`transcript_source_settings` is the same mock pattern again, one level
-earlier in the pipeline: which app (Zoom / Google Meet / Teams / Otter.ai)
-a user's transcripts *would* come from. "Check now" only logs what it would
-do — there's no real transcript parser wired in yet (that's being built
-separately). Until there is, meetings and their commitments can be entered
-by hand via `POST /api/meetings` (paste/upload a transcript) and
-`POST /api/commitments` (add a commitment to it) — see readme.md.
+`transcript_source_settings` is one level earlier in the pipeline: which
+app (Zoom / Google Meet / Teams / Otter.ai) a user's transcripts come from.
+"Check now" is still a mocked pull — it only logs what it would do. But
+transcript *capture* also has a real push path: `/api/webhooks/transcript-
+capture/<token>` is a real inbound endpoint (same shape as the tracker
+webhook above) that creates a meeting the instant it's called, identified
+by a per-user `webhook_token` rather than a session or plain email — a
+Custom app's own automation, or (once wired up) Zoom's own event
+subscription, can point at it directly. `simulate-incoming-capture`
+exercises the same code path from the UI. There's still no transcript
+parser wired in (that's being built separately), so a captured meeting
+lands with raw transcript text only — commitments are still entered by
+hand via `POST /api/commitments`, same as a manual upload — see readme.md.
 
 Each of the three settings sections (nudges, tracker, transcript source) also
 accepts a user-defined "custom" app, for when the predefined list doesn't
@@ -56,6 +62,7 @@ Then open http://localhost:5000 in a browser.
 import json
 import os
 import re
+import secrets
 import sqlite3
 import urllib.error
 import urllib.request
@@ -94,6 +101,26 @@ def migrate_db():
             cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
             if "custom_name" not in cols:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN custom_name TEXT")
+
+        source_cols = {row[1] for row in conn.execute("PRAGMA table_info(transcript_source_settings)")}
+        if "webhook_token" not in source_cols:
+            # SQLite's ALTER TABLE can't add a UNIQUE column directly; the
+            # uniqueness constraint only applies to fresh installs via
+            # schema.sql. Collisions are effectively impossible in practice
+            # (secrets.token_urlsafe(24)), so this is an acceptable gap for
+            # a migrated local DB.
+            conn.execute("ALTER TABLE transcript_source_settings ADD COLUMN webhook_token TEXT")
+
+        meeting_cols = {row[1] for row in conn.execute("PRAGMA table_info(meetings)")}
+        if "transcript_provider" not in meeting_cols:
+            conn.execute("ALTER TABLE meetings ADD COLUMN transcript_provider TEXT")
+
+        log_cols = {row[1] for row in conn.execute("PRAGMA table_info(transcript_sync_log)")}
+        if "direction" not in log_cols:
+            conn.execute("ALTER TABLE transcript_sync_log ADD COLUMN direction TEXT NOT NULL DEFAULT 'outbound'")
+        if "meeting_id" not in log_cols:
+            conn.execute("ALTER TABLE transcript_sync_log ADD COLUMN meeting_id INTEGER REFERENCES meetings(id)")
+
         conn.commit()
 
 
@@ -186,6 +213,28 @@ def list_meetings():
     return jsonify([dict(r) for r in rows])
 
 
+def create_meeting_row(db, owner_email, title, meeting_date, transcript_excerpt, source, transcript_provider=None):
+    """Single insert point for a meeting row — manual upload, every real
+    capture webhook, and the simulate button all go through this."""
+    cur = db.execute(
+        "INSERT INTO meetings (owner_email, title, meeting_date, created_at, source, transcript_excerpt, transcript_provider) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (owner_email, title, meeting_date, now_iso(), source, transcript_excerpt, transcript_provider),
+    )
+    return cur.lastrowid
+
+
+def log_inbound_capture(db, user_email, provider, meeting_id, detail):
+    """Shared by every real/simulated transcript-capture path: records that
+    a transcript was pushed to us (as opposed to 'check now''s outbound
+    direction) and links it to the meeting it created."""
+    db.execute(
+        "INSERT INTO transcript_sync_log (user_email, provider, direction, triggered_at, status, detail, meeting_id) "
+        "VALUES (?, ?, 'inbound', ?, 'received', ?, ?)",
+        (user_email, provider, now_iso(), detail, meeting_id),
+    )
+
+
 @app.route("/api/meetings", methods=["POST"])
 def create_meeting():
     """Manual transcript upload — the real path for getting a meeting into
@@ -203,12 +252,7 @@ def create_meeting():
         return jsonify({"error": "title is required"}), 400
 
     db = get_db()
-    cur = db.execute(
-        "INSERT INTO meetings (owner_email, title, meeting_date, created_at, source, transcript_excerpt) "
-        "VALUES (?, ?, ?, ?, 'upload', ?)",
-        (email, title, meeting_date, now_iso(), transcript_excerpt),
-    )
-    meeting_id = cur.lastrowid
+    meeting_id = create_meeting_row(db, email, title, meeting_date, transcript_excerpt, source="upload")
     db.commit()
     db.close()
     return jsonify({"id": meeting_id}), 201
@@ -812,7 +856,7 @@ def tracker_webhook():
 # ---------- transcript source (Zoom / Google Meet / Teams / Otter.ai) ----------
 
 TRANSCRIPT_SOURCE_REQUIRED_FIELDS = {
-    "zoom": ["account_email", "api_key"],
+    "zoom": ["account_id", "client_id", "client_secret", "webhook_secret_token"],
     "google_meet": ["workspace_email", "api_key"],
     "teams": ["tenant_id", "api_key"],
     "otter": ["account_email", "api_key"],
@@ -823,6 +867,25 @@ TRANSCRIPT_SOURCE_LABELS = {
 }
 
 
+def get_or_create_webhook_token(db, email):
+    """Every transcript source row gets a webhook_token as soon as it
+    exists, regardless of provider — it's what a real Zoom/Meet/Teams
+    integration (or the generic capture endpoint) uses in its callback URL
+    to identify which user's row to act on, instead of a plain email match."""
+    row = db.execute("SELECT webhook_token FROM transcript_source_settings WHERE user_email = ?", (email,)).fetchone()
+    if row and row["webhook_token"]:
+        return row["webhook_token"]
+    token = secrets.token_urlsafe(24)
+    if row:
+        db.execute("UPDATE transcript_source_settings SET webhook_token = ? WHERE user_email = ?", (token, email))
+    else:
+        db.execute(
+            "INSERT INTO transcript_source_settings (user_email, webhook_token) VALUES (?, ?)",
+            (email, token),
+        )
+    return token
+
+
 @app.route("/api/transcript-source-settings", methods=["GET"])
 def get_transcript_source_settings():
     email = require_email()
@@ -830,16 +893,20 @@ def get_transcript_source_settings():
         return jsonify({"error": "not identified"}), 401
     db = get_db()
     row = db.execute(
-        "SELECT provider, custom_name, config_json, enabled FROM transcript_source_settings WHERE user_email = ?", (email,)
+        "SELECT provider, custom_name, config_json, enabled, webhook_token FROM transcript_source_settings WHERE user_email = ?", (email,)
     ).fetchone()
-    db.close()
     if row is None:
-        return jsonify({"provider": "none", "custom_name": None, "config": {}, "enabled": True})
+        token = get_or_create_webhook_token(db, email)
+        db.commit()
+        db.close()
+        return jsonify({"provider": "none", "custom_name": None, "config": {}, "enabled": True, "webhook_token": token})
+    db.close()
     return jsonify({
         "provider": row["provider"],
         "custom_name": row["custom_name"],
         "config": json.loads(row["config_json"]),
         "enabled": bool(row["enabled"]),
+        "webhook_token": row["webhook_token"],
     })
 
 
@@ -865,17 +932,36 @@ def save_transcript_source_settings():
             return jsonify({"error": f"missing required field(s) for {provider}: {', '.join(missing)}"}), 400
 
     db = get_db()
+    token = get_or_create_webhook_token(db, email)
     db.execute(
-        "INSERT INTO transcript_source_settings (user_email, provider, custom_name, config_json, enabled) "
-        "VALUES (?, ?, ?, ?, ?) "
+        "INSERT INTO transcript_source_settings (user_email, provider, custom_name, config_json, enabled, webhook_token) "
+        "VALUES (?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(user_email) DO UPDATE SET "
         "provider = excluded.provider, custom_name = excluded.custom_name, "
         "config_json = excluded.config_json, enabled = excluded.enabled",
-        (email, provider, custom_name, json.dumps(config), enabled),
+        (email, provider, custom_name, json.dumps(config), enabled, token),
     )
     db.commit()
     db.close()
-    return jsonify({"ok": True}), 201
+    return jsonify({"ok": True, "webhook_token": token}), 201
+
+
+@app.route("/api/transcript-source/regenerate-token", methods=["POST"])
+def regenerate_transcript_webhook_token():
+    """Rotates the webhook token — any URL built from the old one (pasted
+    into a Zoom/Meet/Teams config, or used for the generic endpoint) stops
+    working immediately."""
+    email = require_email()
+    if not email:
+        return jsonify({"error": "not identified"}), 401
+    db = get_db()
+    token = secrets.token_urlsafe(24)
+    cur = db.execute("UPDATE transcript_source_settings SET webhook_token = ? WHERE user_email = ?", (token, email))
+    if cur.rowcount == 0:
+        db.execute("INSERT INTO transcript_source_settings (user_email, webhook_token) VALUES (?, ?)", (email, token))
+    db.commit()
+    db.close()
+    return jsonify({"ok": True, "webhook_token": token}), 201
 
 
 @app.route("/api/transcript-source/check-now", methods=["POST"])
@@ -899,7 +985,7 @@ def check_transcript_source():
     provider = source["provider"]
     config = json.loads(source["config_json"])
     account = (
-        config.get("account_email") or config.get("workspace_email")
+        config.get("account_id") or config.get("account_email") or config.get("workspace_email")
         or config.get("tenant_id") or config.get("account_identifier") or "your account"
     )
     label = source["custom_name"] if provider == "custom" else TRANSCRIPT_SOURCE_LABELS[provider]
@@ -907,8 +993,8 @@ def check_transcript_source():
 
     triggered_at = now_iso()
     db.execute(
-        "INSERT INTO transcript_sync_log (user_email, provider, triggered_at, status, detail) "
-        "VALUES (?, ?, ?, 'mock_checked', ?)",
+        "INSERT INTO transcript_sync_log (user_email, provider, direction, triggered_at, status, detail) "
+        "VALUES (?, ?, 'outbound', ?, 'mock_checked', ?)",
         (email, provider, triggered_at, detail),
     )
     db.commit()
@@ -923,10 +1009,95 @@ def transcript_source_log():
         return jsonify({"error": "not identified"}), 401
     db = get_db()
     rows = db.execute(
-        "SELECT * FROM transcript_sync_log WHERE user_email = ? ORDER BY triggered_at DESC LIMIT 10", (email,)
+        "SELECT transcript_sync_log.*, meetings.title AS meeting_title "
+        "FROM transcript_sync_log LEFT JOIN meetings ON meetings.id = transcript_sync_log.meeting_id "
+        "WHERE transcript_sync_log.user_email = ? ORDER BY transcript_sync_log.triggered_at DESC LIMIT 10",
+        (email,),
     ).fetchall()
     db.close()
     return jsonify([dict(r) for r in rows])
+
+
+# ---------- live transcript capture (real inbound + simulate) ----------
+
+LIVE_CAPTURE_DEMO = {
+    "title": "Weekly Standup — Growth Team",
+    "transcript_excerpt": (
+        "...alright, quick sync. I'll get the campaign brief over to marketing "
+        "by tomorrow. And I'll follow up with the vendor on the contract "
+        "redlines before Friday. Let's regroup once we hear back..."
+    ),
+}
+
+
+@app.route("/api/webhooks/transcript-capture/<token>", methods=["POST"])
+def transcript_capture_webhook(token):
+    """Real, functional inbound endpoint — the generic push half of
+    transcript sourcing, for Custom apps or anything that can be pointed at
+    a plain JSON webhook. Point it at this URL (with your token from
+    Integrations) and a new meeting is created here immediately, no manual
+    upload needed. No outbound call is made anywhere in this app; this
+    route only *receives*.
+
+    Not session-protected — an external service has no browser session —
+    so the user is identified via the webhook_token in the URL rather than
+    a session cookie or a plain email field."""
+    db = get_db()
+    source = db.execute(
+        "SELECT user_email, provider FROM transcript_source_settings WHERE webhook_token = ?", (token,)
+    ).fetchone()
+    if source is None:
+        db.close()
+        return jsonify({"error": "unrecognized webhook token"}), 404
+
+    data = request.get_json(force=True)
+    title = (data.get("title") or "").strip()
+    meeting_date = (data.get("meeting_date") or "").strip() or today_str()
+    transcript_excerpt = (data.get("transcript_excerpt") or "").strip() or None
+    provider = (data.get("provider") or "").strip() or source["provider"] or "custom"
+
+    if not title:
+        db.close()
+        return jsonify({"error": "title is required"}), 400
+
+    meeting_id = create_meeting_row(db, source["user_email"], title, meeting_date, transcript_excerpt, source="live", transcript_provider=provider)
+    log_inbound_capture(db, source["user_email"], provider, meeting_id, f'Received live transcript for "{title}"')
+    db.commit()
+    db.close()
+    return jsonify({"ok": True, "meeting_id": meeting_id}), 201
+
+
+@app.route("/api/meetings/simulate-incoming-capture", methods=["POST"])
+def simulate_incoming_capture():
+    """UI test button: exercises the same code path a real transcript-
+    capture webhook call would, so the push flow (and the dashboard's live
+    update) is demonstrable without a live Zoom/Meet/Teams automation
+    calling in."""
+    email = require_email()
+    if not email:
+        return jsonify({"error": "not identified"}), 401
+
+    db = get_db()
+    source = db.execute(
+        "SELECT provider, custom_name, enabled FROM transcript_source_settings WHERE user_email = ?", (email,)
+    ).fetchone()
+    if source is None or source["provider"] == "none" or not source["enabled"]:
+        db.close()
+        return jsonify({"error": "no transcript source configured — set one up below to simulate a live capture"}), 400
+
+    data = request.get_json(silent=True) or {}
+    title = (data.get("title") or "").strip() or LIVE_CAPTURE_DEMO["title"]
+    meeting_date = (data.get("meeting_date") or "").strip() or today_str()
+    transcript_excerpt = (data.get("transcript_excerpt") or "").strip() or LIVE_CAPTURE_DEMO["transcript_excerpt"]
+
+    provider = source["provider"]
+    label = source["custom_name"] if provider == "custom" else TRANSCRIPT_SOURCE_LABELS.get(provider, provider)
+
+    meeting_id = create_meeting_row(db, email, title, meeting_date, transcript_excerpt, source="live", transcript_provider=provider)
+    log_inbound_capture(db, email, provider, meeting_id, f'Simulated: {label} pushed a transcript for "{title}" the moment the meeting ended')
+    db.commit()
+    db.close()
+    return jsonify({"ok": True, "meeting_id": meeting_id}), 201
 
 
 # ---------- AI-suggested setup steps (custom, user-defined apps only) ----------
