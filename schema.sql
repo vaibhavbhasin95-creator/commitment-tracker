@@ -28,7 +28,21 @@ CREATE TABLE IF NOT EXISTS commitments (
     confidence_score REAL,                       -- NULL for manually-entered commitments
     source_quote TEXT,
     external_ref TEXT,                           -- id/key in the external tracker, once synced (e.g. a Jira issue key)
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    owner_match TEXT                             -- how owner_email was set: 'auto' | 'manual' | 'ambiguous' | 'none'; NULL = never looked up
+);
+
+-- The account's people directory (uploaded as CSV): used to find each task
+-- owner's email so nudges can reach them. Transcripts only carry names.
+CREATE TABLE IF NOT EXISTS people (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_email TEXT NOT NULL,                   -- the app account this directory belongs to
+    first_name TEXT NOT NULL DEFAULT '',
+    last_name TEXT NOT NULL DEFAULT '',
+    email TEXT NOT NULL,
+    username TEXT NOT NULL DEFAULT '',           -- corporate user name, e.g. jsmith or DOMAIN\jsmith
+    created_at TEXT NOT NULL,
+    UNIQUE(owner_email, email)
 );
 
 CREATE TABLE IF NOT EXISTS nudge_settings (
@@ -39,6 +53,7 @@ CREATE TABLE IF NOT EXISTS nudge_settings (
     webhook_or_key TEXT NOT NULL,
     cadence TEXT NOT NULL DEFAULT 'day_before',   -- 'day_before' | 'on_due' | 'daily_after_overdue'
     enabled INTEGER NOT NULL DEFAULT 1,
+    config_json TEXT NOT NULL DEFAULT '{}',      -- extra channel settings, e.g. SMTP server details for email
     UNIQUE(user_email, channel)
 );
 
@@ -47,7 +62,15 @@ CREATE TABLE IF NOT EXISTS nudge_log (
     commitment_id INTEGER NOT NULL REFERENCES commitments(id),
     triggered_at TEXT NOT NULL,
     channel TEXT NOT NULL,
-    status TEXT NOT NULL                          -- 'mock_sent' | 'skipped'
+    status TEXT NOT NULL,                        -- 'sent' | 'failed' | 'skipped' | 'mock_sent' (before 0.6.0)
+    reason TEXT,                                 -- 'test' | 'day_before' | 'on_due' | 'overdue'
+    detail TEXT
+);
+
+-- Per-account switch for sending nudges automatically on each channel's cadence.
+CREATE TABLE IF NOT EXISTS nudge_preferences (
+    user_email TEXT PRIMARY KEY,
+    auto_enabled INTEGER NOT NULL DEFAULT 0
 );
 
 -- A user's external task tracker, e.g. their team already lives in Jira or a
@@ -68,7 +91,7 @@ CREATE TABLE IF NOT EXISTS tracker_sync_log (
     provider TEXT NOT NULL,
     direction TEXT NOT NULL DEFAULT 'outbound',    -- 'outbound' (we pushed) | 'inbound' (tracker pushed to us)
     triggered_at TEXT NOT NULL,
-    status TEXT NOT NULL,                          -- 'mock_synced' | 'received' | 'skipped'
+    status TEXT NOT NULL,                          -- 'mock_synced' | 'synced' | 'received' | 'skipped'
     detail TEXT
 );
 

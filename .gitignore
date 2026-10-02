@@ -4,3 +4,17 @@ __pycache__/
 .venv/
 venv/
 .DS_Store
+ml/emb_cache/
+*.npy
+client_secret*.json
+google_token.json
+_snapshots/
+
+# Confidential: recordings of real meetings/lectures with real participants.
+# Keep these local only — never commit them.
+synthetic_meeting_transcripts_txt/AIPL-BM4 Transcript.txt
+synthetic_meeting_transcripts_txt/Placeholder_ AIPL-BM4, Transcript.txt
+synthetic_meeting_transcripts_txt/fraud_ai_implementation_meeting_transcript.txt
+# Derived from the files above (contain the real lecture's lines verbatim).
+training_data/labelled_utterances.csv
+training_data/utterances_for_labelling.csv
