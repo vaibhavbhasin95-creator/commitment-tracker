@@ -16,8 +16,8 @@ Companion to [prd.md](prd.md) (the why) — this is the concrete, testable *what
 - FR7. A commitment is flagged **overdue** when its due date has passed and its status is not `done` — computed at read time, not a stored status value.
 - FR8. Commitments can be filtered by status and by owner.
 - FR9. A user can change a commitment's status from the dashboard; the change is immediate (no confirmation step).
-- FR9a. A user can create a meeting manually by supplying a title, date, and a transcript (pasted text or an uploaded `.txt` file) — this is a real write, not a mock, since there's no parser yet to depend on.
-- FR9b. From a meeting's detail view, a user can add a commitment to it by hand (task text, owner name, optional owner email/due date/source quote). Manually-entered commitments have no confidence score, distinguishing them from (future) extracted ones.
+- FR9a. A user can create a meeting manually by supplying a title, date, and a transcript (pasted text or an uploaded `.txt` file) — a real write, and (when the extraction model is trained) commitments are auto-extracted from the transcript as part of the same request.
+- FR9b. From a meeting's detail view, a user can add a commitment to it by hand (task text, owner name, optional owner email/due date/source quote), and can re-run extraction over the meeting's saved transcript on demand. Manually-entered commitments have no confidence score, distinguishing them from extracted ones.
 
 ### Dashboard chart
 - FR10. The dashboard shows counts of Pending / In Progress / Done across all of the user's commitments (unaffected by active filters).
@@ -41,7 +41,7 @@ Companion to [prd.md](prd.md) (the why) — this is the concrete, testable *what
 ### Transcript source (mocked)
 - FR20c. A user can configure at most one transcript source: none, Zoom (account email, API key), Google Meet (workspace email, API key), Microsoft Teams (tenant ID, API key), or Otter.ai (account email, API key).
 - FR20d. Saving a source other than "none" requires all of that provider's fields; saving "none" requires nothing.
-- FR20e. "Check for new transcripts" is disabled, with an explanatory note, when no source is configured or enabled; when enabled, it writes a log entry describing what *would* be checked — **no outbound HTTP request is made**, and even a real one wouldn't currently do anything further, since there's no parser yet to act on a fetched transcript.
+- FR20e. "Check for new transcripts" is disabled, with an explanatory note, when no source is configured or enabled; when enabled, it writes a log entry describing what *would* be checked — **no outbound HTTP request is made**. A transcript that arrives through the real live-capture webhook path (rather than this mocked pull) is extracted the same way a manual upload is.
 - FR20f. Not configuring a transcript source has no effect on the rest of the app — meetings can always be added manually (see FR9a).
 
 ### Setup guidance
@@ -58,7 +58,7 @@ Companion to [prd.md](prd.md) (the why) — this is the concrete, testable *what
 
 - NFR1. **No real outbound calls.** Nudges, outbound tracker sync, and transcript-source checks must not, under any configuration, make an outbound network request to a third-party service. This is a hard constraint, not a default — it protects against accidental misuse of credentials entered into a prototype. The one deliberate exception is the *inbound* tracker webhook (FR20a): receiving a request needs no outbound call or credential of our own, so it's allowed to be real while every push direction stays mocked.
 - NFR2. **No paid tier.** No UI copy, gating, or backend logic may imply a subscription, trial, or paywall.
-- NFR3. **Zero external dependencies to run.** `pip install flask` and `python app.py` must be sufficient — no cloud account, no API keys, no build step. The one opt-in exception is FR20i's AI-suggested setup steps for a Custom app: if an `ANTHROPIC_API_KEY` environment variable is set, that one feature makes a real outbound call to generate app-specific steps; without it, the app runs identically and that feature just falls back to a generic template.
+- NFR3. **Zero external dependencies to boot.** `pip install flask` and `python app.py` must be sufficient to start the app and use it — no cloud account, no API keys, no build step. Two features degrade gracefully rather than being required: FR20i's AI-suggested setup steps for a Custom app need an `ANTHROPIC_API_KEY` environment variable (falls back to a generic template without it), and commitment extraction (FR9a) needs `pip install -r requirements.txt` plus a trained model (`ml/train_action_detector.py`) — without either, meetings and commitments can still be entered by hand exactly as before, and `POST /api/meetings` reports why extraction didn't run instead of failing the request.
 - NFR4. **Platform-neutral.** No code or copy should assume a specific hosting provider or a specific AI-assistant platform (ChatGPT vs. Claude vs. other) until that decision is made.
 - NFR5. Pages must render legibly in both light and dark themes, meeting basic contrast expectations (validated for the status-chart palette specifically).
 - NFR6. The app is single-instance/local-scale — no requirement for concurrent-user performance, since it isn't deployed anywhere yet.

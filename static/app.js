@@ -77,6 +77,35 @@ async function initNav(activePage) {
     } catch (e) {
         // handled by requireIdentified() on protected pages
     }
+    const brand = document.querySelector(".sidebar-brand");
+    if (brand) {
+        try {
+            const { version } = await api("/api/version");
+            const tag = document.createElement("span");
+            tag.textContent = `v${version}`;
+            tag.title = "App version — see CHANGELOG.md";
+            tag.style.cssText = "margin-left:auto; font-size:11px; font-weight:500; color:var(--text-faint);";
+            brand.appendChild(tag);
+        } catch (e) {
+            // version label is cosmetic; ignore failures
+        }
+    }
+    // [ai-extraction v0.5.0] nav link, shown only when the optional feature is
+    // registered (the status route 404s when AI_EXTRACTION_ENABLED=0).
+    const nav = document.querySelector(".sidebar-nav");
+    if (nav) {
+        try {
+            await api("/api/ai-extraction/status");
+            const link = document.createElement("a");
+            link.href = "/ai-extraction";
+            link.className = "sidebar-link" + (window.location.pathname === "/ai-extraction" ? " active" : "");
+            link.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"></path><path d="M19 17l.8 2.2L22 20l-2.2.8L19 23l-.8-2.2L16 20l2.2-.8z"></path></svg>AI extraction';
+            nav.appendChild(link);
+        } catch (e) {
+            // feature disabled — no link
+        }
+    }
+    // [/ai-extraction v0.5.0]
     const logoutBtn = document.getElementById("logout-btn");
     if (logoutBtn) {
         logoutBtn.addEventListener("click", async () => {

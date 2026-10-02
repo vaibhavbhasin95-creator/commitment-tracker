@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Extraction — Commitment Tracker</title>
+<script>
+(function () {
+    try {
+        var t = localStorage.getItem("ct-theme");
+        if (!t) t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="/style.css">
+<style>
+    /* page-local styles for the optional AI extraction feature (v0.5.0) */
+    .ai-compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 14px; }
+    @media (max-width: 760px) { .ai-compare-grid { grid-template-columns: 1fr; } }
+    .ai-item { padding: 10px 12px; border: 1px solid var(--border, #8883); border-radius: 8px; margin-bottom: 8px; font-size: 13.5px; }
+    .ai-item-meta { color: var(--text-muted); font-size: 12px; margin-top: 3px; }
+    .ai-item-quote { color: var(--text-faint); font-size: 12px; margin-top: 4px; font-style: italic; }
+    .ai-verdict { display: flex; gap: 6px; margin-top: 8px; }
+    .ai-verdict button { padding: 3px 10px; font-size: 12px; }
+    .ai-verdict button.on-yes { background: var(--chart-done); color: #fff; border-color: transparent; }
+    .ai-verdict button.on-no { background: var(--danger, #d64545); color: #fff; border-color: transparent; }
+    .ai-score-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    .ai-score-table th, .ai-score-table td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border, #8883); }
+    .ai-error { color: var(--danger, #d64545); font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+    <aside class="sidebar">
+        <div class="sidebar-brand"><span class="logo-dot"></span>Commitment Tracker</div>
+        <nav class="sidebar-nav">
+            <a href="/dashboard" class="sidebar-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"></rect><rect x="14" y="3" width="7" height="5" rx="1.5"></rect><rect x="14" y="12" width="7" height="9" rx="1.5"></rect><rect x="3" y="16" width="7" height="5" rx="1.5"></rect></svg>
+                Dashboard
+            </a>
+            <a href="/people" class="sidebar-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                People
+            </a>
+            <a href="/settings" class="sidebar-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                Integrations
+            </a>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="avatar" id="nav-avatar"></div>
+            <div class="sidebar-footer-email" id="nav-email"></div>
+            <button class="icon-btn" id="logout-btn" title="Log out" aria-label="Log out">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+            </button>
+        </div>
+    </aside>
+
+    <div class="main">
+        <div class="topbar">
+            <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg></button>
+        </div>
+
+        <div class="content" style="max-width: 900px;">
+            <h2 class="page-heading">AI extraction</h2>
+            <div class="mock-notice">
+                Choose what reads your transcripts and pulls out commitments: the <strong>built-in model</strong>
+                (free, runs on this machine) or an <strong>AI service your company already pays for</strong>, using
+                your own API key. Then compare the two on your own meetings before deciding.
+                If the AI service fails for any reason, extraction automatically falls back to the built-in model.
+            </div>
+
+            <!-- ---------- engine settings ---------- -->
+            <div class="card">
+                <div class="section-title">Extraction engine</div>
+                <form class="settings-form" id="engine-form">
+                    <div>
+                        <label for="engine">Engine</label>
+                        <select id="engine">
+                            <option value="builtin">Built-in model (default)</option>
+                            <option value="anthropic">Claude — Anthropic API</option>
+                            <option value="openai_compatible">OpenAI-compatible API (OpenAI, Azure OpenAI, Gemini, Groq, Ollama…)</option>
+                        </select>
+                    </div>
+
+                    <div id="fields-anthropic" class="engine-fields" style="display:none;">
+                        <div>
+                            <label for="anthropic-key">API key</label>
+                            <input type="password" id="anthropic-key" autocomplete="off" placeholder="sk-ant-...">
+                        </div>
+                        <div style="margin-top:12px;">
+                            <label for="anthropic-model">Model</label>
+                            <input type="text" id="anthropic-model" placeholder="claude-opus-5">
+                        </div>
+                        <details class="help-steps" style="margin-top:10px;">
+                            <summary>Where do I get an Anthropic API key?</summary>
+                            <ol>
+                                <li>Sign in at <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a> with your company's account.</li>
+                                <li>Go to API Keys → Create Key, and copy it here.</li>
+                                <li>A Claude.ai Pro / Team / Enterprise chat seat does <em>not</em> include API access — API usage is billed separately per request.</li>
+                            </ol>
+                        </details>
+                    </div>
+
+                    <div id="fields-openai_compatible" class="engine-fields" style="display:none;">
+                        <div>
+                            <label for="oa-preset">Provider</label>
+                            <select id="oa-preset">
+                                <option value="">Choose to fill in the base URL…</option>
+                                <option value="https://api.openai.com/v1">OpenAI</option>
+                                <option value="https://YOUR-RESOURCE.openai.azure.com/openai/v1">Azure OpenAI</option>
+                                <option value="https://generativelanguage.googleapis.com/v1beta/openai">Google Gemini</option>
+                                <option value="https://api.groq.com/openai/v1">Groq</option>
+                                <option value="http://localhost:11434/v1">Ollama (local, free, no key)</option>
+                            </select>
+                        </div>
+                        <div style="margin-top:12px;">
+                            <label for="oa-base-url">Base URL</label>
+                            <input type="text" id="oa-base-url" placeholder="https://api.openai.com/v1">
+                        </div>
+                        <div style="margin-top:12px;">
+                            <label for="oa-key">API key</label>
+                            <input type="password" id="oa-key" autocomplete="off" placeholder="leave blank for a local server with no key">
+                        </div>
+                        <div style="margin-top:12px;">
+                            <label for="oa-model">Model / deployment name</label>
+                            <input type="text" id="oa-model" placeholder="as named by your provider">
+                        </div>
+                        <details class="help-steps" style="margin-top:10px;">
+                            <summary>Subscriptions vs API keys</summary>
+                            <ol>
+                                <li>ChatGPT Plus / Team / Enterprise and Copilot seats are for the chat apps; they don't include an API key. API usage is billed separately per request.</li>
+                                <li>Companies on Azure OpenAI, Google Cloud (Gemini) or similar usually already have API access — ask whoever manages that account for a key and the model/deployment name.</li>
+                                <li>For Azure, replace YOUR-RESOURCE in the URL with your resource name, and put the deployment name in the Model field.</li>
+                            </ol>
+                        </details>
+                    </div>
+
+                    <div id="consent-block" style="display:none;">
+                        <label><input type="checkbox" id="consent" style="width:auto; margin-right:6px;">
+                            I confirm our organisation allows meeting transcripts to be sent to this provider.</label>
+                        <div id="key-hint" style="font-size:12px; color:var(--text-faint); margin-top:4px;"></div>
+                    </div>
+
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button type="submit" class="btn">Save engine</button>
+                        <button type="button" class="btn secondary" id="test-btn">Test connection</button>
+                    </div>
+                </form>
+                <div id="test-result" style="margin-top:14px;"></div>
+            </div>
+
+            <!-- ---------- comparison ---------- -->
+            <div class="card" style="margin-top:22px;">
+                <div class="section-title">Compare on a real meeting</div>
+                <p style="font-size:13px; color:var(--text-muted); margin:-4px 0 12px;">
+                    Runs both engines on a meeting's saved transcript and shows the results side by side. Nothing is added
+                    to the meeting. Mark each item as a real commitment or not, then save — the scoreboard below adds up
+                    how often each engine was right. The AI side makes one paid API call and can take up to a minute.
+                </p>
+                <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                    <select id="compare-meeting" style="min-width:260px;"></select>
+                    <button class="btn secondary" id="compare-btn">Run comparison</button>
+                </div>
+                <div id="compare-result"></div>
+            </div>
+
+            <!-- ---------- scoreboard ---------- -->
+            <div class="card" style="margin-top:22px;">
+                <div class="section-title">Scoreboard</div>
+                <div id="scoreboard"></div>
+            </div>
+
+            <div class="saved-settings" style="margin-top:22px;">
+                <div class="section-title">Recent AI extraction runs</div>
+                <div id="runs"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/app.js"></script>
+<script>
+let savedSettings = null;
+let currentComparison = null;
+
+function showEngineFields(engine) {
+    document.querySelectorAll(".engine-fields").forEach(el => { el.style.display = "none"; });
+    const el = document.getElementById(`fields-${engine}`);
+    if (el) el.style.display = "block";
+    document.getElementById("consent-block").style.display = engine === "builtin" ? "none" : "block";
+    const cfg = (savedSettings && savedSettings.configs[engine]) || {};
+    document.getElementById("key-hint").textContent = cfg.has_api_key
+        ? `A key ending ${cfg.api_key_hint.slice(-4)} is saved — leave the key field blank to keep it.`
+        : "";
+}
+
+async function loadSettings() {
+    savedSettings = await api("/api/ai-extraction/settings");
+    const a = savedSettings.configs.anthropic || {};
+    const o = savedSettings.configs.openai_compatible || {};
+    document.getElementById("engine").value = savedSettings.engine;
+    document.getElementById("anthropic-model").value = a.model || "";
+    document.getElementById("oa-base-url").value = o.base_url || "";
+    document.getElementById("oa-model").value = o.model || "";
+    document.getElementById("anthropic-key").value = "";
+    document.getElementById("oa-key").value = "";
+    document.getElementById("consent").checked = !!savedSettings.consent_at;
+    showEngineFields(savedSettings.engine);
+}
+
+function renderItems(items, side) {
+    if (!Array.isArray(items)) {
+        return `<div class="ai-error">${escapeHtml(items && items.error ? items.error : "No result")}</div>`;
+    }
+    if (items.length === 0) return '<div class="nudge-history-empty">No commitments found.</div>';
+    return items.map((c, i) => `
+        <div class="ai-item">
+            <div><strong>${escapeHtml(c.task_text)}</strong></div>
+            <div class="ai-item-meta">${escapeHtml(c.owner_name)} · due ${escapeHtml(c.due_date || "—")}
+                ${c.confidence_score != null ? ` · ${Math.round(c.confidence_score * 100)}% confident` : ""}</div>
+            <div class="ai-item-quote">"${escapeHtml(c.source_quote)}"</div>
+            <div class="ai-verdict" data-side="${side}" data-index="${i}">
+                <button type="button" class="btn secondary" data-value="yes">✓ Real commitment</button>
+                <button type="button" class="btn secondary" data-value="no">✗ Not one</button>
+            </div>
+        </div>
+    `).join("");
+}
+
+function renderComparison(result) {
+    currentComparison = { id: result.id, builtin: [], ai: [] };
+    ["builtin", "ai"].forEach(side => {
+        if (Array.isArray(result[side])) currentComparison[side] = result[side].map(() => null);
+    });
+    const count = items => Array.isArray(items) ? ` (${items.length})` : "";
+    document.getElementById("compare-result").innerHTML = `
+        <div class="ai-compare-grid">
+            <div><div class="section-title">Built-in model${count(result.builtin)}</div>${renderItems(result.builtin, "builtin")}</div>
+            <div><div class="section-title">${escapeHtml(result.model || "AI engine")}${count(result.ai)}</div>${renderItems(result.ai, "ai")}</div>
+        </div>
+        <button class="btn" id="save-verdicts-btn" style="margin-top:6px;">Save review</button>
+    `;
+    document.querySelectorAll(".ai-verdict button").forEach(btn => {
+        btn.addEventListener("click", () => {
+            const box = btn.parentElement;
+            const side = box.dataset.side, index = parseInt(box.dataset.index, 10);
+            const value = btn.dataset.value === "yes";
+            const same = currentComparison[side][index] === value;
+            currentComparison[side][index] = same ? null : value;
+            box.querySelectorAll("button").forEach(b => b.classList.remove("on-yes", "on-no"));
+            if (!same) btn.classList.add(value ? "on-yes" : "on-no");
+        });
+    });
+    document.getElementById("save-verdicts-btn").addEventListener("click", async () => {
+        try {
+            await api(`/api/ai-extraction/comparisons/${currentComparison.id}/verdicts`, {
+                method: "POST", body: { builtin: currentComparison.builtin, ai: currentComparison.ai },
+            });
+            toast("Review saved");
+            await loadScoreboard();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+}
+
+async function loadMeetings() {
+    const meetings = await api("/api/meetings");
+    const select = document.getElementById("compare-meeting");
+    const withTranscript = meetings.filter(m => m.transcript_excerpt);
+    select.innerHTML = withTranscript.length
+        ? withTranscript.map(m => `<option value="${m.id}">${escapeHtml(m.title)} · ${formatDate(m.meeting_date)}</option>`).join("")
+        : '<option value="">No meetings with a saved transcript yet</option>';
+}
+
+async function loadScoreboard() {
+    const data = await api("/api/ai-extraction/scoreboard");
+    const el = document.getElementById("scoreboard");
+    if (data.comparisons.length === 0) {
+        el.innerHTML = '<div class="nudge-history-empty">No comparisons yet — run one above.</div>';
+        return;
+    }
+    const pct = v => v == null ? "—" : `${Math.round(v * 100)}%`;
+    el.innerHTML = `
+        <table class="ai-score-table">
+            <thead><tr><th>Engine</th><th>Items reviewed</th><th>Real commitments</th><th>Precision</th></tr></thead>
+            <tbody>${data.engines.map(e => `
+                <tr><td>${escapeHtml(e.engine)}</td><td>${e.reviewed}</td><td>${e.correct}</td><td><strong>${pct(e.precision)}</strong></td></tr>
+            `).join("")}</tbody>
+        </table>
+        <div style="font-size:12px; color:var(--text-faint); margin:8px 0 14px;">
+            Precision = share of the items you reviewed that were real commitments. It doesn't measure commitments an engine missed —
+            compare the two columns for that.
+        </div>
+        <div class="nudge-history">${data.comparisons.map(c => `
+            <div class="nudge-history-item">${formatDateTime(c.created_at)} — ${escapeHtml(c.meeting_title || "meeting")}:
+                built-in found ${c.builtin_found ?? "error"} (${c.builtin_correct}/${c.builtin_reviewed} marked real),
+                ${escapeHtml(c.ai_label)} found ${c.ai_found ?? "error"} (${c.ai_correct}/${c.ai_reviewed} marked real)</div>
+        `).join("")}</div>
+    `;
+}
+
+async function loadRuns() {
+    const rows = await api("/api/ai-extraction/runs");
+    const el = document.getElementById("runs");
+    el.innerHTML = rows.length === 0
+        ? '<div style="color:var(--text-muted); font-size:14px;">No meetings have been extracted with an AI engine yet.</div>'
+        : rows.map(r => `
+            <div class="nudge-history-item">${formatDateTime(r.created_at)} — ${escapeHtml(r.meeting_title || "meeting")} ·
+                ${escapeHtml(r.model || r.engine)} ·
+                ${r.status === "ok"
+                    ? `${r.commitments} commitment${r.commitments === 1 ? "" : "s"}`
+                    : `<span class="ai-error">fell back to built-in: ${escapeHtml(r.detail || "")}</span>`}</div>
+        `).join("");
+}
+
+async function init() {
+    initThemeToggle();
+    await requireIdentified();
+    await initNav();
+    await Promise.all([loadSettings(), loadMeetings(), loadScoreboard(), loadRuns()]);
+
+    document.getElementById("engine").addEventListener("change", e => showEngineFields(e.target.value));
+    document.getElementById("oa-preset").addEventListener("change", e => {
+        if (e.target.value) document.getElementById("oa-base-url").value = e.target.value;
+    });
+
+    document.getElementById("engine-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const engine = document.getElementById("engine").value;
+        const config = engine === "anthropic"
+            ? { api_key: document.getElementById("anthropic-key").value.trim(), model: document.getElementById("anthropic-model").value.trim() }
+            : engine === "openai_compatible"
+            ? { base_url: document.getElementById("oa-base-url").value.trim(), api_key: document.getElementById("oa-key").value.trim(), model: document.getElementById("oa-model").value.trim() }
+            : {};
+        try {
+            await api("/api/ai-extraction/settings", { method: "POST", body: { engine, config, consent: document.getElementById("consent").checked } });
+            toast(engine === "builtin" ? "Using the built-in model" : "Engine saved — new transcripts will use it");
+            await loadSettings();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    document.getElementById("test-btn").addEventListener("click", async (e) => {
+        const btn = e.currentTarget, out = document.getElementById("test-result");
+        btn.disabled = true;
+        out.innerHTML = '<div style="color:var(--text-muted); font-size:13px;">Calling the saved engine…</div>';
+        try {
+            const r = await api("/api/ai-extraction/test", { method: "POST" });
+            out.innerHTML = `<div style="font-size:13px; margin-bottom:8px;">Connected to <strong>${escapeHtml(r.model)}</strong>. From a 4-line sample transcript it found:</div>`
+                + renderItems(r.commitments, "test").replace(/<div class="ai-verdict"[\s\S]*?<\/div>/g, "");
+        } catch (err) {
+            out.innerHTML = `<div class="ai-error">${escapeHtml(err.message)}</div>`;
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    document.getElementById("compare-btn").addEventListener("click", async (e) => {
+        const meetingId = parseInt(document.getElementById("compare-meeting").value, 10);
+        if (!meetingId) { toast("Pick a meeting with a saved transcript"); return; }
+        const btn = e.currentTarget, out = document.getElementById("compare-result");
+        btn.disabled = true;
+        out.innerHTML = '<div style="color:var(--text-muted); font-size:13px; margin-top:12px;">Running both engines — this can take up to a minute…</div>';
+        try {
+            renderComparison(await api("/api/ai-extraction/compare", { method: "POST", body: { meeting_id: meetingId } }));
+            await loadScoreboard();
+        } catch (err) {
+            out.innerHTML = `<div class="ai-error" style="margin-top:12px;">${escapeHtml(err.message)}</div>`;
+        } finally {
+            btn.disabled = false;
+        }
+    });
+}
+
+init();
+</script>
+</body>
+</html>

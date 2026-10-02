@@ -1,0 +1,12 @@
+flask
+pandas
+numpy
+scikit-learn
+tensorflow
+sentence-transformers
+spacy
+pypdf
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+anthropic

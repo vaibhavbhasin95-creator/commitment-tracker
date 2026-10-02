@@ -25,6 +25,10 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"></rect><rect x="14" y="3" width="7" height="5" rx="1.5"></rect><rect x="14" y="12" width="7" height="9" rx="1.5"></rect><rect x="3" y="16" width="7" height="5" rx="1.5"></rect></svg>
                 Dashboard
             </a>
+            <a href="/people" class="sidebar-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                People
+            </a>
             <a href="/settings" class="sidebar-link">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
                 Integrations
@@ -91,6 +95,7 @@
                     </select>
                 </div>
                 <div style="display:flex; gap:10px;">
+                    <button class="btn secondary" id="sync-all-btn" title="Write every commitment not yet in your Google Sheet, in one go">Sync all to sheet</button>
                     <button class="btn secondary" id="upload-transcript-btn">Upload transcript</button>
                     <button class="btn secondary" id="seed-demo-btn">Load demo meeting</button>
                 </div>
@@ -150,12 +155,21 @@
             </div>
         </div>
 
-        <div class="section-title">Nudge history</div>
+        <div class="section-title">Owner email</div>
+        <div id="modal-owner-match" style="font-size:12.5px; color:var(--text-muted); margin:-6px 0 8px;"></div>
+        <div class="modal-actions" style="margin-top:0;">
+            <input id="modal-owner-email" type="email" list="people-emails" placeholder="name@company.com" style="flex:1; min-width:220px;">
+            <datalist id="people-emails"></datalist>
+            <button class="btn secondary" id="save-owner-email-btn">Save email</button>
+        </div>
+
+        <div class="section-title" style="margin-top:22px;">Nudge history</div>
         <div class="nudge-history" id="modal-nudge-history"></div>
 
         <div class="modal-actions">
-            <button class="btn" id="send-nudge-btn">Send test nudge</button>
-            <span style="font-size:12px; color:var(--text-faint);">Mock only — no message actually sent</span>
+            <select id="nudge-channel"></select>
+            <button class="btn" id="send-nudge-btn">Send nudge now</button>
+            <span style="font-size:12px; color:var(--text-faint);" id="nudge-note"></span>
         </div>
 
         <div class="section-title" style="margin-top:22px;">Task tracker sync</div>
@@ -190,8 +204,13 @@
         <div class="section-title" style="margin-top:20px;">Commitments in this meeting</div>
         <div class="nudge-history" id="meeting-modal-commitments"></div>
 
+        <div class="modal-actions" style="margin-top:10px;">
+            <button class="btn secondary" id="extract-commitments-btn">Extract commitments</button>
+            <span style="font-size:12px; color:var(--text-faint);">Re-runs the commitment classifier over this meeting's transcript</span>
+        </div>
+
         <div class="section-title" style="margin-top:20px;">Add a commitment</div>
-        <p style="font-size:12.5px; color:var(--text-faint); margin:-6px 0 12px;">No transcript parser is wired in yet — add what came out of this meeting by hand.</p>
+        <p style="font-size:12.5px; color:var(--text-faint); margin:-6px 0 12px;">Missed something, or this meeting has no saved transcript? Add it by hand.</p>
         <form id="add-commitment-form" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
             <div style="grid-column:1/-1;">
                 <label for="ac-task">Task</label>
@@ -226,7 +245,7 @@
         <button class="modal-close" id="upload-modal-close">&times;</button>
         <h2>Upload a transcript</h2>
         <p style="font-size:12.5px; color:var(--text-faint); margin:4px 0 14px;">
-            No parser is wired in yet, so this just saves the transcript as a meeting — add commitments to it by hand afterward (or from your configured transcript source, once that's connected in Integrations).
+            Commitments are extracted automatically from the transcript text (or add them by hand afterward if it misses something, or from your configured transcript source, once that's connected in Integrations).
         </p>
         <form id="upload-form" style="display:grid; gap:14px;">
             <div>
@@ -304,7 +323,11 @@ function renderCommitments(commitments) {
         <tr class="row-clickable" data-id="${c.id}">
             <td>${escapeHtml(c.task_text)}</td>
             <td>${escapeHtml(c.meeting_title)}</td>
-            <td>${escapeHtml(c.owner_name)}</td>
+            <td>${escapeHtml(c.owner_name)}${c.owner_email
+                ? `<div style="font-size:11.5px; color:var(--text-faint);">${escapeHtml(c.owner_email)}</div>`
+                : c.owner_match === "ambiguous"
+                ? '<div style="font-size:11.5px; color:var(--chart-pending);">shared name — pick email</div>'
+                : ""}</td>
             <td>${formatDate(c.due_date)}</td>
             <td>
                 <span class="badge status-${c.status}">${STATUS_LABELS[c.status]}</span>
@@ -402,12 +425,44 @@ async function openModal(id) {
         : "—";
     document.getElementById("modal-status").value = c.status;
 
+    // owner email: auto-matched from the People directory, or set by hand
+    const matchText = {
+        auto: "Matched automatically from the People directory.",
+        manual: "Set by hand.",
+        ambiguous: `More than one person is called "${c.owner_name}" — choose the right email${c.owner_candidates.length ? ": " + c.owner_candidates.join(", ") : ""}.`,
+        none: `"${c.owner_name}" isn't in the People directory — add them there, or type their email here.`,
+    };
+    document.getElementById("modal-owner-match").textContent = matchText[c.owner_match]
+        || (c.owner_email ? "" : "No email yet — upload your team on the People page, or type it here.");
+    document.getElementById("modal-owner-email").value = c.owner_email || "";
+    try {
+        const { people } = await api("/api/people");
+        const candidates = new Set(c.owner_candidates);
+        const ordered = [...people].sort((a, b) => candidates.has(b.email) - candidates.has(a.email));
+        document.getElementById("people-emails").innerHTML = ordered.map(p =>
+            `<option value="${escapeHtml(p.email)}">${escapeHtml(`${p.first_name} ${p.last_name}`.trim())}</option>`).join("");
+    } catch (e) { /* suggestions are optional */ }
+
+    // nudge channels configured in Integrations
+    const channels = (await api("/api/nudge-settings")).filter(s => s.enabled);
+    const channelSelect = document.getElementById("nudge-channel");
+    channelSelect.innerHTML = channels.map(s =>
+        `<option value="${s.channel}">${escapeHtml(s.channel === "custom" ? (s.custom_name || "Custom") : s.channel)}</option>`).join("");
+    channelSelect.style.display = channels.length ? "" : "none";
+    document.getElementById("send-nudge-btn").disabled = channels.length === 0;
+    document.getElementById("nudge-note").textContent = channels.length
+        ? (c.owner_email ? `Goes to ${c.owner_email}` : "Owner has no email — email and Slack DMs will be skipped")
+        : "No nudge channel set up — add one in Integrations";
+
     const historyEl = document.getElementById("modal-nudge-history");
     if (c.nudge_history.length === 0) {
         historyEl.innerHTML = '<div class="nudge-history-empty">No nudges sent yet.</div>';
     } else {
+        const statusText = { sent: "sent", failed: "failed", skipped: "skipped", mock_sent: "mock, not sent" };
         historyEl.innerHTML = c.nudge_history.map(n => `
-            <div class="nudge-history-item">${formatDateTime(n.triggered_at)} — ${n.channel} (mock sent)</div>
+            <div class="nudge-history-item">${formatDateTime(n.triggered_at)} — ${escapeHtml(n.channel)}
+                · ${statusText[n.status] || escapeHtml(n.status)}${n.reason && n.reason !== "test" ? ` (${escapeHtml(n.reason.replace("_", " "))})` : ""}
+                ${n.detail ? `<div style="font-size:12px; color:var(--text-faint);">${escapeHtml(n.detail)}</div>` : ""}</div>
         `).join("");
     }
 
@@ -416,7 +471,7 @@ async function openModal(id) {
         trackerHistoryEl.innerHTML = '<div class="nudge-history-empty">No syncs yet.</div>';
     } else {
         trackerHistoryEl.innerHTML = c.tracker_history.map(t => `
-            <div class="nudge-history-item">${t.direction === "inbound" ? "↓ from tracker" : "↑ to tracker"} · ${formatDateTime(t.triggered_at)} — ${t.detail}</div>
+            <div class="nudge-history-item">${t.direction === "inbound" ? "↓ from tracker" : "↑ to tracker"} · ${formatDateTime(t.triggered_at)} — ${escapeHtml(t.detail)}</div>
         `).join("");
     }
     document.getElementById("modal-external-ref").textContent = c.external_ref
@@ -426,9 +481,11 @@ async function openModal(id) {
     const syncBtn = document.getElementById("sync-tracker-btn");
     const trackerNote = document.getElementById("modal-tracker-note");
     syncBtn.disabled = !c.tracker_configured;
-    trackerNote.textContent = c.tracker_configured
-        ? "Mock only — no request actually sent"
-        : "No task tracker connected — set one up in Integrations";
+    trackerNote.textContent = !c.tracker_configured
+        ? "No task tracker connected — set one up in Integrations"
+        : c.tracker_provider === "google_sheets"
+        ? "Writes a real row to your Google Sheet"
+        : "Mock only — no request actually sent";
 
     const simulateBtn = document.getElementById("simulate-inbound-btn");
     simulateBtn.disabled = !c.external_ref;
@@ -496,27 +553,51 @@ async function init() {
     });
 
     document.getElementById("modal-status").addEventListener("change", async (e) => {
-        await api(`/api/commitments/${currentCommitmentId}`, { method: "PATCH", body: { status: e.target.value } });
-        toast("Status updated");
+        const result = await api(`/api/commitments/${currentCommitmentId}`, { method: "PATCH", body: { status: e.target.value } });
+        toast(result.tracker_sync_error ? `Status updated here, but not in the sheet: ${result.tracker_sync_error}` : "Status updated");
         await loadAll();
     });
 
-    document.getElementById("send-nudge-btn").addEventListener("click", async () => {
-        const result = await api(`/api/commitments/${currentCommitmentId}/send-test-nudge`, {
-            method: "POST",
-            body: { channel: "slack" },
-        });
-        toast("Test nudge logged (mock — nothing was actually sent)");
-        await openModal(currentCommitmentId);
-    });
-
-    document.getElementById("sync-tracker-btn").addEventListener("click", async () => {
+    document.getElementById("send-nudge-btn").addEventListener("click", async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
         try {
-            await api(`/api/commitments/${currentCommitmentId}/sync-tracker`, { method: "POST" });
-            toast("Tracker sync logged (mock — nothing was actually sent)");
+            const result = await api(`/api/commitments/${currentCommitmentId}/send-test-nudge`, {
+                method: "POST",
+                body: { channel: document.getElementById("nudge-channel").value },
+            });
+            toast(result.status === "sent" ? `Nudge sent — ${result.detail}` : `Nudge ${result.status}: ${result.detail}`);
             await openModal(currentCommitmentId);
         } catch (err) {
             toast(err.message);
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    document.getElementById("save-owner-email-btn").addEventListener("click", async () => {
+        const value = document.getElementById("modal-owner-email").value.trim();
+        try {
+            await api(`/api/commitments/${currentCommitmentId}`, { method: "PATCH", body: { owner_email: value } });
+            toast(value ? `Owner email set to ${value}` : "Owner email cleared — it will be matched from People again");
+            await openModal(currentCommitmentId);
+            await loadAll();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    document.getElementById("sync-tracker-btn").addEventListener("click", async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        try {
+            const result = await api(`/api/commitments/${currentCommitmentId}/sync-tracker`, { method: "POST" });
+            toast(result.status === "synced" ? result.detail : "Tracker sync logged (mock — nothing was actually sent)");
+            await openModal(currentCommitmentId);
+        } catch (err) {
+            toast(err.message);
+        } finally {
+            btn.disabled = false;
         }
     });
 
@@ -590,15 +671,66 @@ async function init() {
         const file = document.getElementById("upload-file").files[0];
         const pastedText = document.getElementById("upload-text").value.trim();
 
+        // The file picker's accept=".txt" is only a hint — most OS dialogs
+        // (and drag-and-drop) still let another format through, and reading
+        // a binary file (e.g. .docx, .pdf) as text produces garbage instead
+        // of an error. Check the extension ourselves before reading it.
+        if (file && !file.name.toLowerCase().endsWith(".txt")) {
+            toast(`"${file.name}" isn't a .txt file — convert it to plain text first, or paste the transcript text directly below.`);
+            return;
+        }
+
         let transcript_excerpt = pastedText;
         if (file) {
             transcript_excerpt = await file.text();
         }
 
         try {
-            await api("/api/meetings", { method: "POST", body: { title, meeting_date, transcript_excerpt } });
-            toast("Meeting saved");
+            const result = await api("/api/meetings", { method: "POST", body: { title, meeting_date, transcript_excerpt } });
+            if (result.extraction_error) {
+                toast(`Meeting saved — extraction unavailable (${result.extraction_error})`);
+            } else if (result.tracker_sync_error) {
+                toast(`Extracted ${result.commitments_extracted} commitment(s), but the sheet sync failed: ${result.tracker_sync_error}`);
+            } else {
+                const plural = result.commitments_extracted === 1 ? "" : "s";
+                toast(result.commitments_extracted === 0
+                    ? "Meeting saved — no commitments detected in the transcript"
+                    : result.synced_to_tracker > 0
+                    ? `Meeting saved — ${result.commitments_extracted} commitment${plural} extracted and written to your Google Sheet`
+                    : `Meeting saved — extracted ${result.commitments_extracted} commitment${plural}`);
+            }
             closeUploadModal();
+            await loadAll();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    document.getElementById("sync-all-btn").addEventListener("click", async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        try {
+            const result = await api("/api/tracker/sync-all", { method: "POST" });
+            toast(result.synced > 0
+                ? `Wrote ${result.synced} commitment${result.synced === 1 ? "" : "s"} to your Google Sheet`
+                : "Everything is already in your Google Sheet");
+            await loadAll();
+        } catch (err) {
+            toast(err.message);
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    // ---------- extract commitments (meeting modal) ----------
+
+    document.getElementById("extract-commitments-btn").addEventListener("click", async () => {
+        try {
+            const result = await api(`/api/meetings/${currentMeetingId}/extract-commitments`, { method: "POST" });
+            toast(result.commitments_extracted > 0
+                ? `Extracted ${result.commitments_extracted} commitment${result.commitments_extracted === 1 ? "" : "s"}`
+                : "No commitments detected in this transcript");
+            await openMeetingModal(currentMeetingId);
             await loadAll();
         } catch (err) {
             toast(err.message);

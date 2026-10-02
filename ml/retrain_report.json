@@ -1,0 +1,176 @@
+{
+  "date": "2026-10-01",
+  "families": {
+    "template_numbered": {
+      "lines": 302,
+      "commitments": 22,
+      "current_model": {
+        "precision": 0.153,
+        "recall": 0.682,
+        "f1": 0.25,
+        "tp": 15,
+        "fp": 83,
+        "fn": 7,
+        "flagged": 98,
+        "actual": 22
+      },
+      "retrained": {
+        "precision": 0.552,
+        "recall": 0.727,
+        "f1": 0.627,
+        "tp": 16,
+        "fp": 13,
+        "fn": 6,
+        "flagged": 29,
+        "actual": 22
+      },
+      "retrained_threshold": 0.98
+    },
+    "template_corpus": {
+      "lines": 390,
+      "commitments": 81,
+      "current_model": {
+        "precision": 0.224,
+        "recall": 0.37,
+        "f1": 0.279,
+        "tp": 30,
+        "fp": 104,
+        "fn": 51,
+        "flagged": 134,
+        "actual": 81
+      },
+      "retrained": {
+        "precision": 0.479,
+        "recall": 0.42,
+        "f1": 0.447,
+        "tp": 34,
+        "fp": 37,
+        "fn": 47,
+        "flagged": 71,
+        "actual": 81
+      },
+      "retrained_threshold": 0.7
+    },
+    "workshop_clustering": {
+      "lines": 234,
+      "commitments": 12,
+      "current_model": {
+        "precision": 0.117,
+        "recall": 0.583,
+        "f1": 0.194,
+        "tp": 7,
+        "fp": 53,
+        "fn": 5,
+        "flagged": 60,
+        "actual": 12
+      },
+      "retrained": {
+        "precision": 1.0,
+        "recall": 0.333,
+        "f1": 0.5,
+        "tp": 4,
+        "fp": 0,
+        "fn": 8,
+        "flagged": 4,
+        "actual": 12
+      },
+      "retrained_threshold": 0.9
+    },
+    "workshop_validation": {
+      "lines": 152,
+      "commitments": 11,
+      "current_model": {
+        "precision": 0.147,
+        "recall": 1.0,
+        "f1": 0.256,
+        "tp": 11,
+        "fp": 64,
+        "fn": 0,
+        "flagged": 75,
+        "actual": 11
+      },
+      "retrained": {
+        "precision": 0.571,
+        "recall": 0.727,
+        "f1": 0.64,
+        "tp": 8,
+        "fp": 6,
+        "fn": 3,
+        "flagged": 14,
+        "actual": 11
+      },
+      "retrained_threshold": 0.6
+    },
+    "real_lecture": {
+      "lines": 1809,
+      "commitments": 19,
+      "current_model": {
+        "precision": 0.014,
+        "recall": 0.263,
+        "f1": 0.027,
+        "tp": 5,
+        "fp": 348,
+        "fn": 14,
+        "flagged": 353,
+        "actual": 19
+      },
+      "retrained": {
+        "precision": 0.02,
+        "recall": 0.053,
+        "f1": 0.029,
+        "tp": 1,
+        "fp": 50,
+        "fn": 18,
+        "flagged": 51,
+        "actual": 19
+      },
+      "retrained_threshold": 0.98
+    },
+    "fy2027": {
+      "lines": 109,
+      "commitments": 13,
+      "current_model": {
+        "precision": 0.286,
+        "recall": 0.769,
+        "f1": 0.417,
+        "tp": 10,
+        "fp": 25,
+        "fn": 3,
+        "flagged": 35,
+        "actual": 13
+      },
+      "retrained": {
+        "precision": 0.5,
+        "recall": 0.308,
+        "f1": 0.381,
+        "tp": 4,
+        "fp": 4,
+        "fn": 9,
+        "flagged": 8,
+        "actual": 13
+      },
+      "retrained_threshold": 0.9
+    }
+  },
+  "summary": {
+    "current_macro_f1": 0.237,
+    "retrained_macro_f1": 0.437
+  },
+  "final_threshold": 0.9,
+  "fold_thresholds": [
+    0.98,
+    0.7,
+    0.9,
+    0.6,
+    0.98,
+    0.9
+  ],
+  "deployed": false,
+  "new_data_weight": 8.0,
+  "data": {
+    "csv_rows": 44504,
+    "labelled_lines": 2996,
+    "labelled_commitments": 158
+  },
+  "deployment_note": "Auto-deploy reverted 2026-10-01: macro-F1 improved (0.237->0.437) but the only real business meeting (fy2027) regressed (F1 0.417->0.381, recall 0.77->0.31). Production keeps the previous model; retrained model kept as ml/action_detector_candidate.keras pending a decision."
+}
