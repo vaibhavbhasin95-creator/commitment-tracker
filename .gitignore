@@ -11,10 +11,14 @@ google_token.json
 _snapshots/
 
 # Confidential: recordings of real meetings/lectures with real participants.
-# Keep these local only — never commit them.
-synthetic_meeting_transcripts_txt/AIPL-BM4 Transcript.txt
-synthetic_meeting_transcripts_txt/Placeholder_ AIPL-BM4, Transcript.txt
-synthetic_meeting_transcripts_txt/fraud_ai_implementation_meeting_transcript.txt
+# Keep these local only — never commit them. Patterns have no folder so copies
+# anywhere in the tree (e.g. a backup folder) are ignored too.
+*AIPL-BM4*
+fraud_ai_implementation_meeting_transcript.txt
 # Derived from the files above (contain the real lecture's lines verbatim).
-training_data/labelled_utterances.csv
-training_data/utterances_for_labelling.csv
+labelled_utterances.csv
+utterances_for_labelling.csv
+
+# Local share/backup bundles (duplicates of committed files plus the confidential ones above).
+Curent Status/
+Curent Status.zip
