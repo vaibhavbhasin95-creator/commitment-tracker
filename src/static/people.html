@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>People — Commitment Tracker</title>
+<script>
+(function () {
+    try {
+        var t = localStorage.getItem("ct-theme");
+        if (!t) t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="/style.css">
+<style>
+    .people-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    .people-table th, .people-table td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border, #8883); vertical-align: middle; }
+    .people-table input { width: 100%; padding: 5px 7px; font-size: 13px; }
+    .people-actions { white-space: nowrap; }
+    .people-actions button { padding: 3px 9px; font-size: 12px; }
+    .owner-stats { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--text-muted); margin-top: 6px; }
+    .owner-stats strong { color: var(--text); }
+    @media (max-width: 700px) { .people-table .col-user { display: none; } }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+    <aside class="sidebar">
+        <div class="sidebar-brand"><span class="logo-dot"></span>Commitment Tracker</div>
+        <nav class="sidebar-nav">
+            <a href="/dashboard" class="sidebar-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"></rect><rect x="14" y="3" width="7" height="5" rx="1.5"></rect><rect x="14" y="12" width="7" height="9" rx="1.5"></rect><rect x="3" y="16" width="7" height="5" rx="1.5"></rect></svg>
+                Dashboard
+            </a>
+            <a href="/people" class="sidebar-link active">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                People
+            </a>
+            <a href="/settings" class="sidebar-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                Integrations
+            </a>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="avatar" id="nav-avatar"></div>
+            <div class="sidebar-footer-email" id="nav-email"></div>
+            <button class="icon-btn" id="logout-btn" title="Log out" aria-label="Log out">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+            </button>
+        </div>
+    </aside>
+
+    <div class="main">
+        <div class="topbar">
+            <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg></button>
+        </div>
+
+        <div class="content" style="max-width: 900px;">
+            <h2 class="page-heading">People</h2>
+            <div class="mock-notice">
+                Transcripts only mention names, but reminders need an email address. Upload your team here and every
+                new task's owner is matched to a person automatically. When two people share a name, the task is
+                flagged instead of guessed — pick the right person on the task itself.
+            </div>
+
+            <div class="card">
+                <div class="section-title">Upload a people file</div>
+                <p style="font-size:13px; color:var(--text-muted); margin:-4px 0 12px;">
+                    A CSV with the columns <strong>First Name, Last Name, Email ID, Corporate User Name, Designation</strong>
+                    (from Excel: File → Save As → CSV). Only Email ID is required. Designation (job title, e.g. "VP Finance")
+                    sets the tone of AI-tailored email reminders; a file without that column keeps the designations already saved.
+                    <a href="/api/people/template.csv">Download a template</a>.
+                </p>
+                <form class="settings-form" id="upload-form">
+                    <div>
+                        <label for="people-file">CSV file</label>
+                        <input type="file" id="people-file" accept=".csv,text/csv" style="width:100%;">
+                    </div>
+                    <div>
+                        <label><input type="radio" name="mode" value="merge" checked style="width:auto; margin-right:6px;">Add new people and update existing ones</label>
+                        <label style="margin-top:4px;"><input type="radio" name="mode" value="replace" style="width:auto; margin-right:6px;">Replace the whole list with this file</label>
+                    </div>
+                    <button type="submit" class="btn" style="justify-self:start;">Upload</button>
+                </form>
+                <div id="upload-result" style="margin-top:12px;"></div>
+            </div>
+
+            <div class="card" style="margin-top:22px;">
+                <div class="section-title">Directory</div>
+                <div class="owner-stats" id="owner-stats"></div>
+                <div style="overflow-x:auto; margin-top:12px;">
+                    <table class="people-table">
+                        <thead><tr><th>First name</th><th>Last name</th><th>Email</th><th>Designation</th><th class="col-user">User name</th><th></th></tr></thead>
+                        <tbody id="people-body"></tbody>
+                        <tfoot>
+                            <tr>
+                                <td><input id="new-first" placeholder="First name"></td>
+                                <td><input id="new-last" placeholder="Last name"></td>
+                                <td><input id="new-email" type="email" placeholder="name@company.com"></td>
+                                <td><input id="new-designation" placeholder="e.g. Finance Manager"></td>
+                                <td class="col-user"><input id="new-user" placeholder="jsmith"></td>
+                                <td class="people-actions"><button class="btn secondary" id="add-btn">Add</button></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/app.js"></script>
+<script>
+let people = [];
+
+function describeRematch(counts) {
+    if (!counts) return "";
+    return `Task owners re-checked: ${counts.auto} matched, ${counts.ambiguous} need a choice, ${counts.none} not found.`;
+}
+
+function renderStats(status) {
+    const n = key => status[key] || 0;
+    document.getElementById("owner-stats").innerHTML = `
+        <span><strong>${people.length}</strong> people</span>
+        <span>Task owners: <strong>${n("auto") + n("manual")}</strong> with an email</span>
+        <span><strong>${n("ambiguous")}</strong> need a choice (shared name)</span>
+        <span><strong>${n("none")}</strong> not in the directory</span>`;
+}
+
+function rowHtml(p) {
+    return `<tr data-id="${p.id}">
+        <td>${escapeHtml(p.first_name)}</td><td>${escapeHtml(p.last_name)}</td>
+        <td>${escapeHtml(p.email)}</td><td>${p.designation ? escapeHtml(p.designation) : '<span style="color:var(--text-faint);">—</span>'}</td>
+        <td class="col-user">${escapeHtml(p.username)}</td>
+        <td class="people-actions">
+            <button class="btn secondary" data-action="edit">Edit</button>
+            <button class="btn secondary" data-action="delete">Remove</button>
+        </td></tr>`;
+}
+
+function editRowHtml(p) {
+    return `<tr data-id="${p.id}">
+        <td><input data-f="first_name" value="${escapeHtml(p.first_name)}"></td>
+        <td><input data-f="last_name" value="${escapeHtml(p.last_name)}"></td>
+        <td><input data-f="email" value="${escapeHtml(p.email)}"></td>
+        <td><input data-f="designation" value="${escapeHtml(p.designation || "")}"></td>
+        <td class="col-user"><input data-f="username" value="${escapeHtml(p.username)}"></td>
+        <td class="people-actions">
+            <button class="btn" data-action="save">Save</button>
+            <button class="btn secondary" data-action="cancel">Cancel</button>
+        </td></tr>`;
+}
+
+async function load() {
+    const data = await api("/api/people");
+    people = data.people;
+    const body = document.getElementById("people-body");
+    body.innerHTML = people.length
+        ? people.map(rowHtml).join("")
+        : '<tr><td colspan="6" style="color:var(--text-muted);">No people yet — upload a CSV or add someone below.</td></tr>';
+    renderStats(data.task_owner_status);
+}
+
+async function init() {
+    initThemeToggle();
+    await requireIdentified();
+    await initNav();
+    await load();
+
+    document.getElementById("upload-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const file = document.getElementById("people-file").files[0];
+        const out = document.getElementById("upload-result");
+        if (!file) { toast("Choose a CSV file first"); return; }
+        if (!file.name.toLowerCase().endsWith(".csv")) {
+            toast(`"${file.name}" isn't a .csv file — in Excel use File → Save As → CSV`);
+            return;
+        }
+        const mode = document.querySelector('input[name="mode"]:checked').value;
+        if (mode === "replace" && !confirm("Replace the whole directory with this file? People not in the file will be removed.")) return;
+        try {
+            const r = await api("/api/people/upload", { method: "POST", body: { csv: await file.text(), mode } });
+            out.innerHTML = `<div style="font-size:13px;">Added ${r.added}, updated ${r.updated}${r.removed ? `, removed ${r.removed}` : ""}. ${describeRematch(r.tasks_rematched)}</div>`
+                + (r.row_errors.length ? `<ul style="font-size:12.5px; color:var(--text-muted); margin:6px 0 0 18px;">${r.row_errors.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul>` : "");
+            document.getElementById("upload-form").reset();
+            await load();
+        } catch (err) {
+            out.innerHTML = `<div style="font-size:13px; color:var(--danger, #d64545);">${escapeHtml(err.message)}</div>`;
+        }
+    });
+
+    document.getElementById("add-btn").addEventListener("click", async () => {
+        const body = {
+            first_name: document.getElementById("new-first").value, last_name: document.getElementById("new-last").value,
+            email: document.getElementById("new-email").value, username: document.getElementById("new-user").value,
+            designation: document.getElementById("new-designation").value,
+        };
+        try {
+            const r = await api("/api/people", { method: "POST", body });
+            ["new-first", "new-last", "new-email", "new-designation", "new-user"].forEach(id => { document.getElementById(id).value = ""; });
+            toast(`Added. ${describeRematch(r.tasks_rematched)}`);
+            await load();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    document.getElementById("people-body").addEventListener("click", async (e) => {
+        const btn = e.target.closest("button[data-action]");
+        if (!btn) return;
+        const tr = btn.closest("tr"), id = parseInt(tr.dataset.id, 10);
+        const person = people.find(p => p.id === id);
+        try {
+            if (btn.dataset.action === "edit") {
+                tr.outerHTML = editRowHtml(person);
+            } else if (btn.dataset.action === "cancel") {
+                tr.outerHTML = rowHtml(person);
+            } else if (btn.dataset.action === "save") {
+                const body = {};
+                tr.querySelectorAll("input[data-f]").forEach(i => { body[i.dataset.f] = i.value; });
+                const r = await api(`/api/people/${id}`, { method: "PATCH", body });
+                toast(`Saved. ${describeRematch(r.tasks_rematched)}`);
+                await load();
+            } else if (btn.dataset.action === "delete") {
+                if (!confirm(`Remove ${person.email} from the directory?`)) return;
+                const r = await api(`/api/people/${id}`, { method: "DELETE" });
+                toast(`Removed. ${describeRematch(r.tasks_rematched)}`);
+                await load();
+            }
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+}
+
+init();
+</script>
+</body>
+</html>

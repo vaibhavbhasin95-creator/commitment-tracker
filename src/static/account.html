@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Account — Commitment Tracker</title>
+<script>
+(function () {
+    try {
+        var t = localStorage.getItem("ct-theme");
+        if (!t) t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="/style.css">
+<style>
+    .people-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    .people-table th, .people-table td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border, #8883); vertical-align: middle; }
+    .people-table input { width: 100%; padding: 5px 7px; font-size: 13px; }
+    .people-actions { white-space: nowrap; }
+    .people-actions button { padding: 3px 9px; font-size: 12px; }
+    .owner-stats { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--text-muted); margin-top: 6px; }
+    .owner-stats strong { color: var(--text); }
+    @media (max-width: 700px) { .people-table .col-user { display: none; } }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+    <aside class="sidebar">
+        <div class="sidebar-brand"><span class="logo-dot"></span>Commitment Tracker</div>
+        <nav class="sidebar-nav">
+            <a href="/dashboard" class="sidebar-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"></rect><rect x="14" y="3" width="7" height="5" rx="1.5"></rect><rect x="14" y="12" width="7" height="9" rx="1.5"></rect><rect x="3" y="16" width="7" height="5" rx="1.5"></rect></svg>
+                Dashboard
+            </a>
+            <a href="/people" class="sidebar-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                People
+            </a>
+            <a href="/settings" class="sidebar-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                Integrations
+            </a>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="avatar" id="nav-avatar"></div>
+            <div class="sidebar-footer-email" id="nav-email"></div>
+            <button class="icon-btn" id="logout-btn" title="Log out" aria-label="Log out">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+            </button>
+        </div>
+    </aside>
+
+    <div class="main">
+        <div class="topbar">
+            <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg></button>
+        </div>
+
+        <div class="content" style="max-width: 640px;">
+            <h2 class="page-heading">Account &amp; sign-in</h2>
+            <div class="card">
+                <div class="section-title">Signed in as</div>
+                <div id="account-email" style="font-weight:650;"></div>
+                <div id="account-methods" class="view-note" style="margin:6px 0 0;"></div>
+            </div>
+
+            <div class="card" style="margin-top:22px;">
+                <div class="section-title" id="password-title">Change password</div>
+                <form class="settings-form" id="password-form">
+                    <div id="current-wrap"><label for="current-password">Current password</label>
+                        <input type="password" id="current-password" autocomplete="current-password"></div>
+                    <div><label for="new-password">New password</label>
+                        <input type="password" id="new-password" autocomplete="new-password" required>
+                        <div style="font-size:12px; color:var(--text-faint); margin-top:4px;">At least 10 characters. Changing it signs out every other browser.</div></div>
+                    <div><label for="repeat-password">Repeat new password</label>
+                        <input type="password" id="repeat-password" autocomplete="new-password" required></div>
+                    <button type="submit" class="btn" style="justify-self:start;">Save password</button>
+                </form>
+            </div>
+
+            <div class="card" style="margin-top:22px;">
+                <div class="section-title">Sessions</div>
+                <p class="view-note" style="margin:0 0 12px;">Lost a laptop, or signed in on a shared computer? This signs out every browser, including this one.</p>
+                <button class="btn danger-outline" id="logout-everywhere-btn">Sign out everywhere</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/app.js"></script>
+<script>
+async function load() {
+    const me = await api("/api/me");
+    document.getElementById("account-email").textContent = me.display_name ? `${me.display_name} · ${me.email}` : me.email;
+    const methods = [];
+    if (me.has_password) methods.push("password");
+    me.sso_identities.forEach(p => methods.push(`single sign-on (${p})`));
+    document.getElementById("account-methods").textContent = methods.length
+        ? `Signs in with: ${methods.join(", ")}.` : "No sign-in method yet.";
+    document.getElementById("password-title").textContent = me.has_password ? "Change password" : "Set a password";
+    document.getElementById("current-wrap").style.display = me.has_password ? "" : "none";
+}
+
+async function init() {
+    initThemeToggle();
+    await requireIdentified();
+    await initNav();
+    await load();
+
+    document.getElementById("password-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const next = document.getElementById("new-password").value;
+        if (next !== document.getElementById("repeat-password").value) { toast("The two new passwords don't match"); return; }
+        try {
+            await api("/api/auth/password", { method: "POST", body: {
+                current_password: document.getElementById("current-password").value, new_password: next } });
+            e.target.reset();
+            toast("Password saved — other browsers were signed out");
+            await load();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    document.getElementById("logout-everywhere-btn").addEventListener("click", async () => {
+        if (!confirm("Sign out of every browser, including this one?")) return;
+        await api("/api/auth/logout-everywhere", { method: "POST" });
+        window.location.href = "/";
+    });
+}
+
+init();
+</script>
+</body>
+</html>

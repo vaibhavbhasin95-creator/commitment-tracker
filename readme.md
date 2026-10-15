@@ -1,94 +1,145 @@
 # Commitment Tracker
 
-A local prototype dashboard that turns meeting commitments ("I'll get that done by Friday") into tracked, nudge-able tasks. Built to validate the UX and product concept before committing to a hosting platform or wiring up real integrations.
+A local web app that turns meeting commitments ("I'll get that done by Friday") into tracked, nudge-able tasks: a transcript comes in, commitments are extracted, each is matched to a person, tracked here (and optionally in a Google Sheet), and owners get reminders.
 
-Commitment extraction is real: a transcript (uploaded by hand, or pushed in via a live-capture webhook) is run through a trained ACTION/DIALOG classifier (`transcript_parser.py` + `ml/train_action_detector.py`, originally prototyped in a Google Colab notebook) that finds commitment-shaped utterances and pulls out the task, owner, and due date. This dashboard is where a user goes to track, follow up on, and optionally sync those commitments to wherever their team already works.
-
-**Version:** see `APP_VERSION` in [app.py](app.py) (also shown in the sidebar and at `GET /api/version`). Every change is recorded in [CHANGELOG.md](CHANGELOG.md).
+**Version:** see `APP_VERSION` in [src/app.py](src/app.py) (also shown in the sidebar and at `GET /api/version`). Every change is recorded in [CHANGELOG.md](CHANGELOG.md).
 
 ## Status
 
-Local prototype, free to use, email-only sign-in. Real integrations: commitment extraction (built-in model or the customer's own AI), Fathom transcript capture, two-way Google Sheets sync, people directory with owner tagging, and nudges by email / Slack / Teams / custom webhook. Still simulated: Jira and custom-tracker outbound sync, and "check now" pulls from Zoom / Google Meet / Teams / Otter.
+Local prototype, free to use. **The up-to-date picture of what is real, what is simulated, and what isn't built is the "Current status" section of [prd.md](prd.md)** (PDF: `docs/Commitment_Tracker_PRD_v<version>.pdf`).
 
-**The up-to-date picture of what is real, what is simulated, and what isn't built is in the "Current status" section of [prd.md](prd.md).** Some feature descriptions below were written for earlier versions; where they disagree with the PRD or [CHANGELOG.md](CHANGELOG.md), those two are correct.
+Real: sign-in (password or SSO), transcript upload (text, `.docx`, `.pdf`) and Fathom capture, commitment extraction (built-in model or the customer's own AI), background jobs, two-way Google Sheets sync, people directory with designations, nudges by email (from your own draft, optionally AI-tailored) / Slack / Teams / custom webhook, signed webhooks, encrypted credentials, live dashboard updates. Still simulated: Jira and custom-tracker outbound sync, and "check now" pulls from Zoom / Google Meet / Teams / Otter.
 
-## Features
+## Folder layout
 
-- **Landing page** with a sample "extracted from your meeting" card and an email-only "Get started" form (no password, no OAuth).
-- **Dashboard**: meetings list, a filterable commitments table (status / owner), overdue flagging, and a compact status-breakdown chart (Pending / In Progress / Done).
-- **Manual transcript upload**: paste or upload a `.txt` transcript to create a meeting — commitments are extracted automatically (see below); add or correct any by hand from the meeting detail view. This path is fully real — nothing here is mocked.
-- **Commitment detail modal**: source quote, owner, due date, extraction confidence (blank for hand-entered commitments), status control, nudge history, and task-tracker sync history (both directions).
-- **Integrations page**:
-  - *Nudges* — per-user Slack / Teams / email / custom webhook or API key, cadence (day-before / on-due / daily-once-overdue). "Send test nudge" logs an entry; nothing is sent. Each channel has "how to get these details" steps.
-  - *Task tracker* — connect Jira, Google Sheets, or a custom app (or neither), with setup steps for each. Outbound "Sync to tracker" logs what *would* be sent and mints an `external_ref` (e.g. a fake Jira issue key). See two-way sync below.
-  - *Transcript source* — configure which app (Zoom / Google Meet / Microsoft Teams / Otter.ai / custom) transcripts would come from, with setup steps for each. "Check for new transcripts" is still a mocked pull (logs what would happen); the live-capture webhook path below is real, and whatever transcript text arrives through either path gets extracted the same way. Not configuring a source is fine; upload transcripts by hand instead.
-  - *Custom apps* — if a provider isn't in the predefined list, pick "Custom" in any of the three sections above and name your own app. Its "how to get these details" steps aren't hand-written; they're suggested by a live AI call (`/api/setup-steps/suggest`) and always shown with a disclaimer that they're unverified. Set `ANTHROPIC_API_KEY` as an environment variable to enable the real call — without it, a generic template list is shown instead (still disclaimed).
-- **Two-way tracker sync**: outbound push is mocked (logged only), but `POST /api/webhooks/tracker-update` is a *real, functional* inbound endpoint — point a Jira Automation rule or a Google Apps Script trigger at it and a status change made there updates the matching commitment here. No outbound call is needed to receive a webhook, so this half is safe to make real even while push stays mocked. A "Simulate update from tracker" button in the commitment modal exercises the same path without needing a live external caller.
-- **Commitment extraction**: `POST /api/meetings` (manual upload), `POST /api/webhooks/transcript-capture/<token>` (real live-capture push), and `simulate-incoming-capture` all run the saved transcript text through `transcript_parser.extract_commitments` — a sentence-embedding classifier (trained by `ml/train_action_detector.py`) flags commitment-shaped utterances, then regex heuristics pull out the owner, task text, and (best-effort) due date. Extracted commitments carry a `confidence_score`; hand-entered ones don't. A meeting still saves even if the model hasn't been trained yet — it just arrives with no auto-extracted commitments, and `POST /api/meetings/<id>/extract-commitments` (also a button in the meeting detail view) can backfill or re-run extraction later.
-- **Light/dark theme** toggle, persisted per browser, no flash of the wrong theme on load.
-- **Demo data**: a "Load demo meeting" button seeds two sample meetings with realistic commitments so the app isn't empty on first look.
+All code is in **`src/`**; everything else in the project root is data, docs or generated output.
 
-## Tech stack
-
-Python (Flask) + SQLite + static HTML/CSS/vanilla JS for the app itself — no build step, no frontend framework, no cloud account required. Commitment extraction adds a small ML stack (TensorFlow/Keras + sentence-transformers + spaCy) that runs locally, no external API calls.
-
-- `app.py` — Flask app and all API routes
-- `schema.sql` — SQLite schema
-- `static/` — the three pages (`index.html`, `dashboard.html`, `settings.html`), shared `app.js`, and `style.css`
-- `transcript_parser.py` — turn/utterance splitting, the ACTION classifier inference call, and owner/task/due-date heuristics
-- `ml/train_action_detector.py` — one-time training script that produces `ml/action_detector.keras` from `train_utterances_balanced.csv` / `test_utterances_balanced.csv`
+```
+commitment-tracker/
+├── src/                      ← all code
+│   ├── app.py                  Flask app: routes and glue
+│   ├── auth.py                 password + SSO sign-in, sessions, CSRF guard
+│   ├── manage_users.py         command line: list accounts, set a password
+│   ├── jobs.py                 background job queue + worker
+│   ├── webhook_security.py     webhook signatures, replay protection, rate limits
+│   ├── document_text.py        .docx / .pdf / .txt → text
+│   ├── transcript_parser.py    built-in extraction (ML classifier + rules)
+│   ├── ai_extraction.py        optional AI extraction engine (trial feature)
+│   ├── ai_writer.py            email-nudge drafts tailored by AI to designation
+│   ├── notifications.py        email / Slack / Teams / custom senders
+│   ├── people_directory.py     people CSV + owner matching
+│   ├── google_sheets.py        Sheets API; google_oauth_setup.py: one-time login
+│   ├── secret_store.py         encryption of saved credentials
+│   ├── live_events.py          live updates (Server-Sent Events)
+│   ├── schema.sql              database schema
+│   ├── static/                 pages, app.js, style.css
+│   ├── tests/                  test suites (python src/tests/run_all.py)
+│   ├── ml/                     training / retraining scripts
+│   └── docs_tools/             builds the PRD PDF, diagrams, technical guide
+├── commitment_tracker.db     database            ┐
+├── secret.key                credential key      │ runtime data — git-ignored,
+├── flask_secret.key          session key         │ back up secret.key
+├── auth_config.json          SSO settings (opt.) │
+├── client_secret_*.json, google_token.json       ┘
+├── ml/                       trained models
+├── docs/                     PRD, diagrams, technical guide
+└── training_data/, *.csv, transcripts            ML data
+```
 
 ## Running it
+
+From the project root:
 
 ```bash
 pip install -r requirements.txt
 python -m spacy download en_core_web_sm
-python ml/train_action_detector.py   # one-time: trains ml/action_detector.keras
-python app.py
+python src/ml/train_action_detector.py   # one-time: trains ml/action_detector.keras
+python src/app.py                        # http://localhost:5000
 ```
 
-Open `http://localhost:5000`, enter any email address, and click **Load demo meeting** to populate sample data (or **Upload transcript** to run a real transcript through extraction).
+Set `CT_DEBUG=1` for Flask's auto-reloading debug server (localhost only — its debugger runs code from the browser).
 
-Skipping the training step is fine — the app still runs (`pip install flask` + `python app.py` is enough to click around), it just won't auto-extract commitments from uploaded transcripts until the model exists.
+**Signing in.** Create an account on the sign-in page (email + password, at least 10 characters). An account created before 0.9.0 has no password; set one from this computer:
 
-Optionally, set `ANTHROPIC_API_KEY` before running to enable real AI-suggested setup steps for custom (user-defined) apps in Integrations — the app runs fine without it, falling back to a generic template.
+```bash
+python src/manage_users.py set-password you@example.com
+python src/manage_users.py list
+```
+
+**Single sign-on (optional).** Copy `auth_config.example.json` to `auth_config.json` and fill in a provider (Google, Microsoft, Okta, Auth0, Keycloak — any OpenID Connect provider). Each provider needs an OAuth app whose redirect URI is `<app URL>/auth/sso/<id>/callback`, e.g. `http://localhost:5000/auth/sso/google/callback`. A "Continue with …" button then appears on the sign-in page. An SSO sign-in with a verified email links to the existing account with that email. Set `"allow_signup": false` to stop new accounts from being created.
+
+**Behind ngrok / HTTPS**, set `CT_COOKIE_SECURE=1` (Secure cookies) and `CT_PUBLIC_URL=https://your-url` (SSO redirect address).
+
+The first extraction after a start is slow (the ML libraries load — several minutes on a slow machine); it runs in the background, so uploads return immediately. Skipping model training is fine: the app runs, uploads just get no automatic commitments until the model exists.
+
+### Environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CT_DEBUG` | off | `1` = Flask debug server with auto-reload |
+| `PORT` | 5000 | Port |
+| `CT_COOKIE_SECURE` | off | `1` when served over HTTPS |
+| `CT_PUBLIC_URL` | request host | Public base URL for SSO redirects |
+| `CT_ALLOW_SIGNUP` | on | `0` = no new accounts (also `allow_signup` in auth_config.json) |
+| `CT_SSO_PROVIDERS`, `CT_SSO_<ID>_CLIENT_ID`, `…_CLIENT_SECRET`, `…_ISSUER` | — | SSO without a config file |
+| `COMMITMENT_TRACKER_SECRET_KEY` | `secret.key` | Credential encryption key |
+| `COMMITMENT_TRACKER_FLASK_SECRET` | `flask_secret.key` | Session signing key |
+| `CT_ALLOW_UNSIGNED_TRACKER_WEBHOOK` | off | `1` = keep the retired unsigned tracker webhook working temporarily |
+| `CT_JOBS_INLINE` | off | `1` = run jobs inside the request (tests) |
+| `NUDGE_CHECK_INTERVAL_SECONDS` | 900 | Automatic nudge check interval |
+| `AI_EXTRACTION_ENABLED` | on | `0` = turn the optional AI extraction feature off |
+| `ANTHROPIC_API_KEY` | — | AI-suggested setup steps for custom apps |
+
+### Tests
+
+```bash
+python src/tests/run_all.py          # every suite; temporary databases and fake services only
+```
+
+## Webhooks
+
+Inbound webhooks must be **signed** with the account's signing secret (Integrations → Webhook security): headers `X-CT-Timestamp` (unix seconds) and `X-CT-Signature: v1=<hex HMAC-SHA256 of "<timestamp>.<body>">`, optionally `X-CT-Delivery` (unique id). Requests older than 5 minutes, replays and more than 60 a minute per URL are refused. The Integrations page has a ready-made Google Apps Script and a Python example.
+
+| URL | Used by |
+|---|---|
+| `POST /api/webhooks/tracker-update/<token>` | Google Sheet / tracker edits → app (task, owner, owner_email, due_date, status; most recent edit wins) |
+| `POST /api/webhooks/transcript-capture/<token>` | Any tool pushing a transcript |
+| `POST /api/webhooks/fathom/<token>` | Fathom (signed with Fathom's own secret) |
 
 ## API overview
 
-All routes except `/`, `/dashboard`, `/settings`, `/api/identify`, and the webhook below require an active session (set via `POST /api/identify`).
+Everything except the sign-in routes and webhooks needs a signed-in session; every POST/PATCH/DELETE needs the header `X-CT-Request: 1`.
 
 | Route | Method | Purpose |
 |---|---|---|
-| `/api/identify` | POST | Upsert a user by email, start a session |
-| `/api/me` / `/api/logout` | GET / POST | Session check / end |
-| `/api/meetings` | GET / POST | List meetings / manually create one (transcript upload, auto-extracts commitments) |
-| `/api/meetings/<id>` | GET | Meeting detail, incl. its commitments |
-| `/api/meetings/<id>/extract-commitments` | POST | (Re)run extraction over a meeting's saved transcript |
-| `/api/meetings/seed-demo` | POST | Insert demo meetings + commitments |
-| `/api/commitments` | GET / POST | List (filter by `status`, `owner`) / manually add one to a meeting |
-| `/api/commitments/<id>` | GET / PATCH | Detail (incl. nudge/tracker history) / update status |
-| `/api/commitments/<id>/send-test-nudge` | POST | Mock nudge — logs only |
-| `/api/commitments/<id>/sync-tracker` | POST | Outbound tracker sync for one commitment — real for Google Sheets (writes the row, or updates its status if already synced), mocked for Jira/Custom |
-| `/api/tracker/sync-all` | POST | Writes every not-yet-synced commitment to the Google Sheet in one API call |
-| `/api/commitments/<id>/simulate-inbound-update` | POST | UI test button for the inbound sync path (session-authed) |
-| `/api/webhooks/tracker-update` | POST | **Real** inbound endpoint — a Jira/Sheets automation posts here |
-| `/api/nudge-settings` | GET / POST | List / upsert a nudge channel |
-| `/api/tracker-settings` | GET / POST | Get / upsert the user's task tracker config |
-| `/api/transcript-source-settings` | GET / POST | Get / upsert which app transcripts come from |
-| `/api/transcript-source/check-now` | POST | Mock "check for new transcripts" — logs only |
-| `/api/transcript-source/log` | GET | Recent transcript-source check log |
-| `/api/setup-steps/suggest` | POST | AI-suggested (or template-fallback) setup steps for a custom app |
+| `/api/auth/config` | GET | Sign-up allowed, SSO buttons |
+| `/api/auth/signup` · `/api/auth/login` · `/api/logout` | POST | Create account · sign in · sign out |
+| `/api/auth/password` · `/api/auth/logout-everywhere` | POST | Change password · end all sessions |
+| `/auth/sso/<id>/start` → `/callback` | GET | SSO sign-in |
+| `/api/me` | GET | Signed-in account |
+| `/api/meetings` | GET / POST | List (with task count + extraction state) / create — JSON or multipart with a `.txt`/`.docx`/`.pdf` `file` |
+| `/api/meetings/<id>` | GET / DELETE | Detail with commitments / delete with its tasks |
+| `/api/meetings/clear` | POST | Delete all meetings (`{"confirm": true}`) |
+| `/api/meetings/<id>/extract-commitments` | POST | Re-run extraction (queued as a job) |
+| `/api/commitments` | GET / POST | List (`meeting_id`, `status`, `owner` filters) / add one |
+| `/api/commitments/clear` | POST | Delete tasks — all, or one meeting's (`{"confirm": true, "meeting_id": …}`) |
+| `/api/commitments/<id>` | GET / PATCH | Detail / edit task_text, owner_name, owner_email, due_date, status (synced to the sheet) |
+| `/api/commitments/<id>/send-test-nudge` · `/sync-tracker` | POST | Send a nudge now · sync to the tracker |
+| `/api/jobs` · `/api/jobs/<id>/retry` · `/cancel` | GET / POST | Background jobs |
+| `/api/people` · `/api/people/upload` · `/api/people/<id>` | … | People directory (with designation) |
+| `/api/nudge-settings`, `/api/nudge-preferences`, `/api/nudges/run-now` | … | Nudge channels (email draft included), automatic nudges |
+| `/api/email-draft/defaults` · `/api/email-draft/preview` | GET / POST | Draft placeholders · preview an (AI-tailored) email |
+| `/api/tracker-settings`, `/api/tracker/sync-all` | … | Task tracker |
+| `/api/transcript-source-settings`, `/api/transcript-source/…` | … | Transcript source |
+| `/api/webhook-security` · `/reveal` · `/rotate` | GET / POST | Webhook URLs, signing secret, recent deliveries |
+| `/api/events` | GET | Live updates stream |
 
-## Known limitations (by design, for now)
+## Known limitations
 
-The full, current list is in [prd.md](prd.md) under "Not built" and "Data & ML status". The most important:
+The full list is in [prd.md](prd.md) under "Not built". The most important:
 
-- No real authentication — anyone who knows a user's email can "sign in" as them.
-- The tracker-update webhook trusts an email plus a row reference; stored secrets (API keys, SMTP password, tokens) are not encrypted.
+- One app process: background jobs and live updates don't span several server processes.
+- No email verification or password reset by email yet — reset with `manage_users.py`.
+- Scanned PDFs (no text layer) can't be read; there's no OCR.
 - Extraction quality on real meetings is limited until the model is retrained on real business-meeting transcripts.
-- Inbound webhooks need a public URL (ngrok today); automatic nudges only run while the app is running.
-- SQLite + Flask's dev server — not meant to run in production as-is.
-
-## What's next
-
-See the **Roadmap** section of [prd.md](prd.md).
+- Inbound webhooks need a public URL (ngrok today). SQLite + Flask's server aren't meant for production as-is.

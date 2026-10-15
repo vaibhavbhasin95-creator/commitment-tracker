@@ -1,0 +1,23 @@
+{
+  "_comment": "Copy to auth_config.json (git-ignored) and fill in. Each provider needs an OAuth/OIDC app whose redirect URI is <app URL>/auth/sso/<id>/callback, e.g. http://localhost:5000/auth/sso/google/callback. Remove providers you don't use.",
+  "allow_signup": true,
+  "sso": {
+    "google": {
+      "client_id": "1234567890-abc.apps.googleusercontent.com",
+      "client_secret": "GOCSPX-...",
+      "allowed_domains": []
+    },
+    "microsoft": {
+      "client_id": "00000000-0000-0000-0000-000000000000",
+      "client_secret": "...",
+      "tenant": "organizations"
+    },
+    "okta": {
+      "label": "Okta",
+      "issuer": "https://your-org.okta.com",
+      "client_id": "...",
+      "client_secret": "...",
+      "trust_email": true
+    }
+  }
+}

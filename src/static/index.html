@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Commitment Tracker</title>
+<script>
+(function () {
+    try {
+        var t = localStorage.getItem("ct-theme");
+        if (!t) t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div class="nav">
+    <div class="nav-left">
+        <div class="nav-brand"><span class="logo-dot"></span>Commitment Tracker</div>
+    </div>
+    <div class="nav-right">
+        <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg></button>
+    </div>
+</div>
+
+<div class="hero">
+    <span class="free-badge">Free for everyone</span>
+    <h1>Turn meeting talk into tracked commitments</h1>
+    <p>Paste in what came out of your meeting — Slack huddle, Teams call, Google Meet, wherever —
+       and keep every "I'll get that done by Friday" from quietly disappearing.</p>
+</div>
+
+<div class="card sample-card">
+    <div class="sample-label">Example — extracted from a meeting</div>
+    <div class="sample-item">
+        <span>Send updated pricing deck to sales team</span>
+        <span class="owner">Priya · due Thu</span>
+    </div>
+    <div class="sample-item">
+        <span>Fix the onboarding email bug</span>
+        <span class="owner">You · due Fri</span>
+    </div>
+    <div class="sample-item">
+        <span>Follow up on the SSO timeline question</span>
+        <span class="owner">Priya · due next week</span>
+    </div>
+</div>
+
+<div class="card identify-card">
+    <div class="auth-tabs" role="tablist">
+        <button class="auth-tab active" data-tab="signin" role="tab">Sign in</button>
+        <button class="auth-tab" data-tab="signup" role="tab" id="signup-tab">Create account</button>
+    </div>
+
+    <form class="auth-form" id="signin-form">
+        <div><label for="signin-email">Email</label><input type="email" id="signin-email" autocomplete="username" required style="width:100%;"></div>
+        <div><label for="signin-password">Password</label><input type="password" id="signin-password" autocomplete="current-password" required style="width:100%;"></div>
+        <button type="submit" class="btn" style="justify-self:start;">Sign in</button>
+    </form>
+
+    <form class="auth-form" id="signup-form" style="display:none;">
+        <div><label for="signup-name">Your name</label><input type="text" id="signup-name" autocomplete="name" style="width:100%;"></div>
+        <div><label for="signup-email">Work email</label><input type="email" id="signup-email" autocomplete="username" required style="width:100%;"></div>
+        <div><label for="signup-password">Password</label><input type="password" id="signup-password" autocomplete="new-password" required style="width:100%;">
+            <div class="identify-note" id="password-rule" style="margin-top:4px;"></div></div>
+        <button type="submit" class="btn" style="justify-self:start;">Create account</button>
+    </form>
+
+    <div id="sso-block" style="display:none;">
+        <div class="sso-divider">or</div>
+        <div class="sso-buttons" id="sso-buttons"></div>
+    </div>
+
+    <div class="identify-note" id="identify-error" style="color:var(--danger);"></div>
+    <div class="identify-note">Had an account before passwords were added? Sign in with SSO if it's set up, or run
+        <code>python src/manage_users.py set-password you@company.com</code> on the computer the app runs on.</div>
+</div>
+
+<script src="/app.js"></script>
+<script>
+(async function () {
+    initThemeToggle();
+    const errorEl = document.getElementById("identify-error");
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("error")) errorEl.textContent = params.get("error");
+
+    // Already signed in? Straight to the dashboard.
+    try {
+        await api("/api/me");
+        window.location.href = "/dashboard";
+        return;
+    } catch (e) { /* not signed in — show the forms */ }
+
+    const showTab = (tab) => {
+        document.querySelectorAll(".auth-tab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+        document.getElementById("signin-form").style.display = tab === "signin" ? "grid" : "none";
+        document.getElementById("signup-form").style.display = tab === "signup" ? "grid" : "none";
+        errorEl.textContent = "";
+    };
+    document.querySelectorAll(".auth-tab").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab)));
+
+    try {
+        const cfg = await api("/api/auth/config");
+        document.getElementById("password-rule").textContent = `At least ${cfg.min_password_length} characters.`;
+        if (!cfg.signup_enabled) document.getElementById("signup-tab").style.display = "none";
+        if (cfg.sso.length) {
+            document.getElementById("sso-block").style.display = "block";
+            document.getElementById("sso-buttons").innerHTML = cfg.sso.map(p =>
+                `<a class="btn secondary" style="text-align:center;" href="/auth/sso/${encodeURIComponent(p.id)}/start">Continue with ${escapeHtml(p.label)}</a>`).join("");
+        }
+    } catch (e) { /* the password form still works */ }
+
+    const submit = (formId, path, body) => document.getElementById(formId).addEventListener("submit", async (e) => {
+        e.preventDefault();
+        errorEl.textContent = "";
+        const btn = e.target.querySelector("button[type=submit]");
+        btn.disabled = true;
+        try {
+            await api(path, { method: "POST", body: body() });
+            window.location.href = "/dashboard";
+        } catch (err) {
+            errorEl.textContent = err.message;
+        } finally {
+            btn.disabled = false;
+        }
+    });
+    submit("signin-form", "/api/auth/login", () => ({
+        email: document.getElementById("signin-email").value.trim(),
+        password: document.getElementById("signin-password").value,
+    }));
+    submit("signup-form", "/api/auth/signup", () => ({
+        name: document.getElementById("signup-name").value.trim(),
+        email: document.getElementById("signup-email").value.trim(),
+        password: document.getElementById("signup-password").value,
+    }));
+})();
+</script>
+</body>
+</html>

@@ -8,6 +8,12 @@ ml/emb_cache/
 *.npy
 client_secret*.json
 google_token.json
+# Encryption key for saved credentials (secret_store.py). Never commit it — and
+# back it up: without it, every saved API key / password has to be re-entered.
+secret.key
+# Session-cookie signing key (auth.py) and SSO client secrets — local only.
+flask_secret.key
+auth_config.json
 _snapshots/
 
 # Confidential: recordings of real meetings/lectures with real participants.
@@ -15,6 +21,7 @@ _snapshots/
 # anywhere in the tree (e.g. a backup folder) are ignored too.
 *AIPL-BM4*
 fraud_ai_implementation_meeting_transcript.txt
+FY2027_Financial_Planning_Meeting_Transcript.*
 # Derived from the files above (contain the real lecture's lines verbatim).
 labelled_utterances.csv
 utterances_for_labelling.csv
