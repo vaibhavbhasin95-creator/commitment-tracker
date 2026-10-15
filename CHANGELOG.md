@@ -8,11 +8,277 @@ All notable changes to Commitment Tracker are recorded here, newest first.
   - **MINOR** (0.**x**.0) — a new feature or capability.
   - **PATCH** (0.x.**y**) — bug fixes and small corrections to existing behavior.
   - **MAJOR** stays at 0 while the app is a prototype; 1.0.0 marks the first release meant for real customers.
-- The current version lives in one place: `APP_VERSION` in [app.py](app.py). It is shown in the sidebar of every page and returned by `GET /api/version`.
+- The current version lives in one place: `APP_VERSION` in [src/app.py](src/app.py). It is shown in the sidebar of every page and returned by `GET /api/version`.
 - Every change gets an entry here in the same session it is made, and `APP_VERSION` is bumped to match.
 - Sections per version: **Added** (new features), **Changed** (changes to existing behavior), **Fixed** (bug fixes), **Security**, **Known issues**.
 - **Revertible features:** a feature built "on trial" gets a snapshot of every file it modifies under `_snapshots/<previous version>/`, plus a revert script and instructions in its changelog entry (first used for 0.5.0).
 - **Git status:** only 0.1.0 is committed to git (commits `b92fcc9`–`1ad95f9`). Everything from 0.2.0 onward exists as uncommitted local changes — no commits or tags have been made for them yet.
+
+---
+
+## [0.10.0] — 2026-10-15 — Every field syncs both ways with Google Sheets; the most recent edit wins
+
+### Added
+- **Owner email in the sheet.**
+  - The sheet now has six columns: A ID, B Task, C Owner, D Due date, E Status, **F Owner email**.
+  - The email was added as column F so a sheet made earlier keeps Status in column E. Its "Owner email" header is added on the next write.
+- **App → sheet, every field.** Changing a task's text, owner, owner email, due date or status in the app rewrites the whole row (B:F) in the sheet, both on auto-sync and on "Sync to tracker". Before, only status was pushed after a row's first write.
+- **Sheet → app, every field.**
+  - The tracker webhook accepts any of `task`, `owner`, `owner_email`, `due_date`, `status`; fields left out are unchanged.
+  - **The Apps Script on the Integrations page now sends the whole row for any edit in columns B–F**, including pasted ranges, and formats date cells as YYYY-MM-DD. Its function name `onStatusEdit` is unchanged, so the existing trigger keeps working once the script is replaced.
+  - An owner renamed in the sheet without an email is matched from People, and the email is written into column F.
+  - An email typed in the sheet counts as a manual pick, which re-matching never overwrites.
+  - A bad date or email from the sheet is refused with a reason.
+- **The most recent edit wins.**
+  - Tasks have a new `updated_at` column, set by every change in the app or from the sheet. Existing databases get it on start.
+  - An edit from the sheet carries its time (`edited_at`, or the signed request's timestamp). If it's older than the app's last change, it's ignored, and the app's version is written back to the row so both sides show the winner. A tie goes to the sheet.
+  - Accepted and ignored edits both appear in the task's sync history.
+- **Tidying sheet values.** After an accepted sheet edit, cells the app normalises are written back: a status typed "Closed" becomes "Done", and a matched email is filled in. Writes through the API don't fire the sheet's On edit trigger, so this can't loop.
+- **Task editing in the app.** The task modal on the dashboard has **Edit details** (task, owner name, due date). `PATCH /api/commitments/<id>` accepts `task_text`, `owner_name` and `due_date` as well as `status` and `owner_email`, and returns the list of fields that `changed`.
+- **New suite `src/tests/test_v010_sheet_sync.py`: 21 checks.** Total: 279 checks, all passing.
+
+### Changed
+- `google_sheets.update_row()` writes B:F; `update_status()` is kept but no longer used by the app.
+- `test_sheets_sync.py` expects the six-column layout and the "Closed" → "Done" tidy-up.
+
+### Action needed
+- **Replace the Apps Script in the sheet** with the new one from Integrations → Task tracker. The 0.9.x script only sends status.
+
+### Git
+- **First commit since 0.7.3 (0.8.0–0.10.0), on a new branch `release/v0.10.0`.** It was not pushed.
+- **No credentials or confidential data are in it:**
+  - Credentials and keys stay git-ignored: the database, `secret.key`, `flask_secret.key`, `auth_config.json`, Google client secret and token, and `_snapshots/`.
+  - **The FY2027 transcripts (`FY2027_Financial_Planning_Meeting_Transcript.docx` / `.txt`), real meeting content, were removed from tracking and added to `.gitignore`.** They stay on disk and in earlier commits already pushed to GitHub.
+
+---
+
+## [0.9.1] — 2026-10-15 — Clear message when the app runs on the wrong Python
+
+### Fixed
+- **Problem:** started with the Windows Store Python instead of the project's `.venv`, a Google Sheets sync failed with "No module named 'googleapiclient'" and was retried 5 times. That Python also lacks TensorFlow, pypdf and anthropic.
+- **Startup warning:** `python src/app.py` now prints a warning listing any missing packages and what each one breaks (Sheets sync, `.pdf` upload, built-in extraction, Claude). It gives the command to use instead: `..\.venv\Scripts\python src\app.py`.
+- **Sheets sync jobs:** a job that fails because a library isn't installed now fails at once, with that instruction, instead of retrying.
+
+---
+
+## [0.9.0] — 2026-10-15 — Real sign-in, signed webhooks, background jobs, .docx/.pdf upload, AI-tailored email nudges, code in src/
+
+### Answered: does AI extraction work for uploaded transcripts?
+Yes, and it always did since 0.5.0. Every capture path goes through the same extraction step: pasted text, uploaded files (now including `.docx` and `.pdf`), the capture and Fathom webhooks, and the "Extract commitments" button. When an account has saved and confirmed an AI engine on the AI extraction page, that engine reads the transcript; the built-in ML model is used only when no AI engine is chosen, or as a fallback when the AI call fails. What was missing was visibility. Now the upload result, the toast and the Background jobs page name the engine that ran (e.g. "Claude (Anthropic API) · claude-opus-5"), including when it fell back ("Built-in model (… failed — see the AI extraction page)").
+
+### Changed — all code moved into `src/`
+- Moved into `src/`:
+  - the app modules and `schema.sql`;
+  - `static/` and `tests/`;
+  - the ML training scripts (`src/ml/`, including `labels.py` and the Colab export);
+  - the doc builders (`src/docs_tools/`).
+- **Runtime data stays in the project root, unmoved:** `commitment_tracker.db`, `secret.key`, the Google credentials, and the models in `ml/`. Every path in the code was updated to find them there. This includes `secret_store.KEY_PATH`; leaving it in `src/` would have generated a new key and made every saved credential unreadable.
+- **Commands are now run from the project root:**
+  - `python src/app.py`
+  - `python src/tests/run_all.py`
+  - `python src/google_oauth_setup.py`
+  - `python src/ml/train_action_detector.py`
+  - `python src/docs_tools/build_prd_pdf.py`
+- Files were moved with plain `mv`, not `git mv`; the git index is untouched.
+
+### Added — real sign-in (`auth.py`, `manage_users.py`)
+- **Email + password accounts.**
+  - Passwords are stored as salted scrypt hashes, at least 10 characters.
+  - Five failures per email or IP lock sign-in for 15 minutes.
+  - A wrong email and a wrong password get the same message, and the timing is equalised.
+- **Single sign-on with any OpenID Connect provider** (Google, Microsoft Entra ID, Okta, Auth0, Keycloak), configured in `auth_config.json` (example: `auth_config.example.json`) or `CT_SSO_*` environment variables.
+  - Uses the authorization-code flow with PKCE, state and nonce.
+  - Checks the token's issuer (including Microsoft's multi-tenant issuer), audience, expiry and verified email.
+  - Can limit sign-in to allowed email domains.
+  - A verified SSO email links to an existing account with that email.
+- **Sessions.**
+  - The signing key now comes from the generated `flask_secret.key` or `COMMITMENT_TRACKER_FLASK_SECRET`; it is no longer hard-coded in source.
+  - Cookies are HttpOnly and SameSite=Lax; set `CT_COOKIE_SECURE=1` behind HTTPS.
+  - Sessions last 14 days.
+  - A password change, or "Sign out everywhere", ends every other session.
+- **CSRF guard:** every state-changing `/api/` call needs the `X-CT-Request: 1` header (sent by `app.js`). Webhooks are exempt; they're signed instead.
+- App pages redirect to sign-in when signed out.
+- New **Account page** (click your name in the sidebar): change or set a password, sign out everywhere.
+- `python src/manage_users.py set-password <email>` gives a pre-0.9.0 account its first password. Only someone at this computer can do it, so nobody can claim an existing account over the web.
+- `POST /api/identify` (email-only sign-in) now answers **410**.
+- The Werkzeug debugger is off unless `CT_DEBUG=1` (it was always on).
+- Responses carry `X-Content-Type-Options`, `X-Frame-Options: DENY` and `Referrer-Policy`.
+
+### Added — webhook security (`webhook_security.py`)
+- **Each account has a signing secret.**
+  - It is encrypted at rest.
+  - Integrations → Webhook security can reveal, copy or rotate it.
+  - Senders sign `"<timestamp>.<body>"` with HMAC-SHA256: headers `X-CT-Timestamp`, `X-CT-Signature: v1=<hex>`, and optionally `X-CT-Delivery`.
+- **Refused requests:**
+  - unsigned or wrongly signed requests;
+  - a changed body;
+  - timestamps more than 5 minutes off;
+  - replays of an accepted delivery;
+  - more than 60 requests a minute per URL.
+- **Fathom** keeps its own signature check, and now also gets the timestamp window and one-time `webhook-id`s. This fixes the 0.7.3 known issue that a captured Fathom request could be replayed.
+- **Tracker status updates moved to `POST /api/webhooks/tracker-update/<token>` (signed).** The old unsigned `/api/webhooks/tracker-update`, which trusted an email plus a row reference, now answers **410**. `CT_ALLOW_UNSIGNED_TRACKER_WEBHOOK=1` re-enables it as a temporary bridge.
+- **Action needed:** replace the Google Apps Script with the signed version on the Integrations page.
+- The generic transcript-capture webhook must now be signed too.
+- Every delivery, accepted or refused, is logged and shown on the Integrations page; entries are kept for 7 days.
+
+### Added — background jobs (`jobs.py`, Background jobs page)
+- A persistent job queue in SQLite, worked by one thread inside the app. These now run as jobs instead of inside the request:
+  - extraction after an upload, a webhook, a simulated capture, or "Extract commitments";
+  - retries of a failed Google Sheets auto-sync, as its own job with up to 5 attempts;
+  - the automatic nudge check, which replaces the old scheduler thread and queues one run per account, never piling up.
+- **Retries:** temporary failures retry with exponential backoff (30 s, 1 min, 2 min…). A permanent failure (e.g. "the model isn't trained") fails at once with the reason.
+- **Restarts:** jobs left running by a stopped app are re-queued on start. Finished jobs are kept for 14 days.
+- **Faster replies:** uploads and webhooks return immediately, so Fathom gets a fast reply. The dashboard shows "Extracting…" on the meeting and updates live when the job finishes (new `job_updated` event).
+- **New "Background jobs" page:** counts, results, errors and next retry time, plus Retry and Cancel.
+- `CT_JOBS_INLINE=1` runs jobs synchronously; the tests use this.
+
+### Added — .docx / .pdf upload (`document_text.py`)
+- **Supported files:** `.txt`, `.docx`, `.pdf`, `.vtt`, `.srt` and `.md`, up to 20 MB, converted to text on the server.
+  - `.docx` uses the standard library, and a two-column speaker | words table becomes "Speaker: words".
+  - `.pdf` uses `pypdf`, which was already a requirement.
+  - Text files in Windows-1252 or UTF-16 are decoded too.
+- The converted text goes through exactly the same extraction as pasted text, so it gets the built-in model or the AI engine.
+- **Refused with a clear reason:**
+  - scanned PDFs (no text layer; there's no OCR);
+  - password-protected PDFs;
+  - old `.doc` files;
+  - renamed files;
+  - oversized files, including zip bombs inside a `.docx`.
+- Checked against the real FY2027 `.docx`, whose text matches the `.txt` version, and a text PDF.
+
+### Added — per-meeting view and clearing (dashboard)
+- **Per-meeting view:** the dashboard shows **one selected meeting's tasks**; the status chart and owner filter follow the selection.
+  - Click a meeting to select it, or pick "All meetings". Its "Details" button opens the meeting.
+  - The selection is remembered per browser and defaults to the newest meeting.
+  - A new upload is selected automatically.
+- **Meeting chips** show a task count and the extraction state ("Extracting…" or "Extraction failed").
+- **Clearing data**, each with a confirmation:
+  - "Clear this meeting's tasks" or "Clear all tasks" keeps the meetings and transcripts, so they can be re-extracted;
+  - "Delete meeting" is in the meeting details;
+  - "Clear all meetings" removes every meeting.
+- **What a delete removes:** the task's nudge and sync history goes with it, and queued extraction jobs are cancelled. Rows already in the Google Sheet are **not** touched.
+- **API:** `GET /api/commitments?meeting_id=`, `DELETE /api/meetings/<id>`, `POST /api/meetings/clear`, `POST /api/commitments/clear`. The two clear routes need `{"confirm": true}`.
+
+### Added — designation in People, AI-tailored email nudges (`ai_writer.py`)
+- **People** have a **Designation** (job title).
+  - The CSV template has a Designation column, and "Title", "Job Title", "Role", "Position" and "Grade" headers are recognised.
+  - Designations can be edited per person.
+  - A CSV without that column keeps the designations already saved.
+- **The email channel has a reminder draft:** subject, body, and "Sign as".
+  - Placeholders: `{owner_first_name}`, `{owner_name}`, `{designation}`, `{task}`, `{due_date}`, `{status}`, `{meeting}`, `{reason}`, `{sender_name}`.
+  - Leaving it blank uses a standard draft.
+- **"Let AI tailor each email to the recipient's designation."**
+  - AI adjusts tone, formality, length and detail: brief and outcome-focused for executives; clear next steps for individual contributors; more guidance for interns. Overdue reminders are firmer.
+  - It keeps every fact and ask and never invents anything.
+  - It uses the engine and key saved on the AI extraction page, reading that table directly, so `ai_writer.py` doesn't depend on `ai_extraction.py` and the trial feature can still be reverted.
+  - Any AI problem sends the draft as written, and the nudge log says why.
+- **"Preview email"** shows the email for a person or designation; nothing is sent.
+- Emails sent by "Send test" and by scheduled reminders use the draft. The standard reminder text is still used for Slack, Teams and custom channels.
+
+### Fixed — Integrations / AI extraction didn't show what was saved
+- **Cause, nudges:** the channel picker always opened on **Slack**. An account that had saved **Email** saw an empty Slack form and concluded nothing was saved. The page now opens on the saved channel (Email first), shows "✓ Saved — showing your saved … settings", and fills the draft fields.
+- **Cause, all settings pages:** pages and API answers had no caching headers, so a browser could reuse an old copy. Every response now carries `Cache-Control: no-cache`. Pages restored by the Back button re-read their data.
+- **Cause, failed loads:** one failing request stopped the rest of the page from loading. Each section now loads independently, and any failure is reported.
+- **New "Saved right now" summary** at the top of Integrations: nudge channels, automatic nudges, tracker, transcript source, extraction engine and webhook signing, read fresh each time.
+- **Unreadable credentials** (encryption key changed) are now flagged on the tracker and transcript forms. They were silently blank before.
+- **AI extraction page:** it now shows "✓ Saved: <engine> · model · key ••••abcd · confirmed <date>", and the key field shows its masked saved value.
+- The values had been saved correctly all along. On this machine every saved setting decrypts.
+
+### Fixed
+- `tests/test_secrets_and_live.py` 5d failed whenever the real pre-encryption backup existed. It now checks that the backup wasn't modified.
+- `tests/run_all.py` could crash printing characters the console can't show.
+
+### Tests
+- **New suite `src/tests/test_v090_platform.py`: 93 checks.**
+  - Sign-up, sign-in, lockout and the pre-0.9.0 account path.
+  - Sessions, password change, sign out everywhere, the CSRF guard, cookie flags and security headers.
+  - SSO token validation and a full SSO round trip against a stand-in provider.
+  - `.docx` and `.pdf` upload, the meeting filter, and clearing.
+  - Jobs: async mode, backoff, permanent failure, retry and cancel, crash recovery, and cancelling on delete.
+  - Signed webhooks: wrong secret, stale timestamp, replay, tampering, rotation, the retired URL, and the rate limit.
+  - Designations, email drafts and AI tailoring.
+- Existing suites now sign in with a password and use signed webhooks.
+- **Total: 257 checks, all passing.**
+
+### Tried live
+On a **copy** of the test database, in Chrome on port 5051:
+- Signed in with a password.
+- The dashboard opened on the newest meeting and showed only its tasks.
+- Uploaded the FY2027 `.docx` and a text PDF. Both were extracted by background jobs: 35 and 26 commitments.
+- Integrations showed all saved settings after leaving and coming back.
+- The email preview worked.
+- The Jobs, People, Account and AI extraction pages all loaded.
+
+**Side effect:** the copy kept the test account's Google Sheets auto-sync, so those two test uploads wrote **61 rows (rows 8–68, IDs 179–239) to the real Google Sheet**. The real database doesn't reference them. Delete them in the sheet if unwanted.
+
+### Docs
+- `prd.md` updated (status tables, not built, user stories, roadmap, layout).
+- The status diagram was regenerated (13 live / 12 built / 3 proof of concept / 5 not built).
+- New `docs/Commitment_Tracker_PRD_v0.9.0.pdf`.
+- `readme.md` rewritten for the new layout, sign-in, environment variables, webhooks and API.
+- `auth_config.example.json` added.
+- `.gitignore` now excludes `flask_secret.key` and `auth_config.json`.
+
+### Known issues
+- **Upgrading signs everyone out.** The existing account has no password yet; set one with `python src/manage_users.py set-password you@example.com`, or configure SSO.
+- **The Google Sheet → app script must be replaced** with the signed one. Until then, status changes made in the sheet are refused with 410.
+- **The first extraction after a start is slow** while TensorFlow and the embedding model load: about 10 minutes on this machine with another load running. It no longer blocks the upload.
+- **One app process:** jobs and live updates don't work across several server processes.
+- **Not built:** email verification, password reset by email, and MFA.
+- `docs/Commitment_Tracker_Technical_Guide.docx` still describes 0.7.3 and the old file layout. Its builder (`src/docs_tools/build_technical_guide.js`) has the new paths but wasn't re-run. Its line references and function inventory need updating.
+- `_snapshots/v0.4.0/revert_ai_extraction.py` targets the pre-`src/` layout and the 0.4.0 `app.py`; reverting the AI feature now means removing the marked `[ai-extraction v0.5.0]` blocks by hand.
+
+---
+
+## [0.8.0] — 2026-10-10 — Platform foundations: secret encryption, live dashboard updates
+
+### Security
+- **Saved credentials are now encrypted at rest.** The new `secret_store.py` encrypts them with Fernet (from the `cryptography` package, now in requirements.txt). Each value is stored as `enc:v1:…`. Encrypted columns:
+  - `nudge_settings.webhook_or_key` and `nudge_settings.config_json`;
+  - `tracker_settings.config_json`;
+  - `transcript_source_settings.config_json`;
+  - `ai_extraction_settings.config_json`.
+
+  `webhook_token` stays readable on purpose: it is the lookup key in webhook URLs, not a stored credential.
+- **The encryption key** is read from `COMMITMENT_TRACKER_SECRET_KEY` if that is set. Otherwise it comes from `secret.key`, which is created automatically next to `app.py` and excluded in `.gitignore`. **Back it up.** Without it, every saved credential has to be re-entered. If the key changes:
+  - settings pages still load and flag the problem;
+  - an action that needs the credential returns 409 and asks you to re-enter it;
+  - a scheduled nudge is logged as `failed`.
+
+  Nothing crashes.
+- **Existing databases are migrated on start.** `migrate_db()` → `encrypt_stored_secrets()` encrypts any plain-text value it finds. Before the first such migration it copies the database to `_snapshots/v0.7.3/commitment_tracker.db.bak`. That copy still holds the credentials in plain text, so delete it once you've confirmed the app works.
+- **Fixed (0.7.3 known issue):** `GET /api/tracker-settings` and `GET /api/transcript-source-settings` no longer return stored secrets. Secret fields come back blank, plus a masked `secret_hints` entry (`••••abcd`). Saving a secret field blank keeps the stored value, but only when the provider hasn't changed. The Integrations page shows "Saved (••••abcd) — leave blank to keep" in those fields.
+
+### Added
+- **Live dashboard updates (Server-Sent Events).** `GET /api/events` streams changes for the signed-in account (`live_events.py` is the in-process pub/sub). After committing a change, routes call `notify()`. Events are published only when the response succeeds:
+
+  | Event | Raised when |
+  |---|---|
+  | `meeting_created` | Upload, generic or Fathom webhook, simulated capture, demo data |
+  | `commitments_changed` | A commitment is added, edited, extracted or synced, or a people-directory change re-matches owners |
+  | `commitment_status` | A status change arrives from the tracker (Sheet/Jira webhook, or the simulate button) |
+  | `nudge_sent` | Any nudge, including ones sent by the scheduler thread |
+
+  - The dashboard reloads within ~0.3 s of an event. It shows a toast for status changes from the tracker, refreshes an open commitment's detail, and shows a Live / Reconnecting… indicator. It falls back to the previous 8-second polling if the stream is unavailable.
+  - The Integrations page's nudge and transcript activity logs also update live.
+  - Limit: one app process. Several worker processes would need a shared broker such as Redis.
+- `tests/test_secrets_and_live.py`: 41 checks covering encryption, masking, keep-on-blank, migration, a wrong key, event routing and isolation per account, and the SSE stream itself. `tests/_support.py` now gives every suite a throwaway key. Total: 160 checks, all passing.
+
+### Changed
+- `docs/make_status_diagram.py` / `docs/status-diagram.svg`:
+  - "Secret encryption" is now live;
+  - a new "Live updates" foundation is added (live);
+  - totals are now 9 live / 9 built / 4 proof of concept / 9 not built.
+- `prd.md` is updated to match. The PRD PDF has **not** been rebuilt yet; run `python docs/build_prd_pdf.py`.
+- The `app.py` module docstring no longer describes nudges and Sheets as mocks.
+
+### Fixed
+- `POST /api/commitments/<id>/sync-tracker` released its database write lock only on the success path. A failure to decrypt the credential would have left the database locked.
+
+### How to revert
+1. Restore `_snapshots/v0.7.3/commitment_tracker.db.bak` over `commitment_tracker.db`.
+2. Check out the 0.7.3 versions of `app.py`, `ai_extraction.py` and `static/`.
+3. Remove `secret_store.py` and `live_events.py`.
 
 ---
 

@@ -1,0 +1,973 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard — Commitment Tracker</title>
+<script>
+(function () {
+    try {
+        var t = localStorage.getItem("ct-theme");
+        if (!t) t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div class="app-shell">
+    <aside class="sidebar">
+        <div class="sidebar-brand"><span class="logo-dot"></span>Commitment Tracker</div>
+        <nav class="sidebar-nav">
+            <a href="/dashboard" class="sidebar-link active">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"></rect><rect x="14" y="3" width="7" height="5" rx="1.5"></rect><rect x="14" y="12" width="7" height="9" rx="1.5"></rect><rect x="3" y="16" width="7" height="5" rx="1.5"></rect></svg>
+                Dashboard
+            </a>
+            <a href="/people" class="sidebar-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                People
+            </a>
+            <a href="/settings" class="sidebar-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                Integrations
+            </a>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="avatar" id="nav-avatar"></div>
+            <div class="sidebar-footer-email" id="nav-email"></div>
+            <button class="icon-btn" id="logout-btn" title="Log out" aria-label="Log out">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+            </button>
+        </div>
+    </aside>
+
+    <div class="main">
+        <div class="topbar">
+            <span class="live-indicator" id="live-indicator" data-state="connecting" title="Updates appear here as they happen — no refresh needed">Connecting…</span>
+            <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg></button>
+        </div>
+
+        <div class="content">
+
+            <div class="card status-summary" id="status-summary">
+                <div class="status-stats">
+                    <div class="stat-tile">
+                        <span class="stat-dot" style="background:var(--chart-pending);"></span>
+                        <div>
+                            <div class="stat-value" id="stat-pending">0</div>
+                            <div class="stat-label">Pending</div>
+                        </div>
+                    </div>
+                    <div class="stat-tile">
+                        <span class="stat-dot" style="background:var(--chart-progress);"></span>
+                        <div>
+                            <div class="stat-value" id="stat-in_progress">0</div>
+                            <div class="stat-label">In progress</div>
+                        </div>
+                    </div>
+                    <div class="stat-tile">
+                        <span class="stat-dot" style="background:var(--chart-done);"></span>
+                        <div>
+                            <div class="stat-value" id="stat-done">0</div>
+                            <div class="stat-label">Done</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="status-bar" id="status-bar" role="img" aria-label="Commitment status breakdown"></div>
+            </div>
+
+            <div id="meetings-section">
+                <div class="meetings-header">
+                    <div class="section-title">Meetings <span style="font-weight:500; color:var(--text-muted); font-size:12.5px;">— pick one to see only its tasks</span></div>
+                    <button class="btn danger-outline chip-btn" id="clear-meetings-btn" title="Delete every meeting and all of its tasks">Clear all meetings</button>
+                </div>
+                <div class="meetings-list" id="meetings-list"></div>
+            </div>
+
+            <div class="section-title" id="tasks-heading">Tasks</div>
+            <div class="toolbar">
+                <div class="filters">
+                    <select id="filter-status">
+                        <option value="">All statuses</option>
+                        <option value="pending">Pending</option>
+                        <option value="in_progress">In progress</option>
+                        <option value="done">Done</option>
+                    </select>
+                    <select id="filter-owner">
+                        <option value="">All owners</option>
+                    </select>
+                </div>
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <button class="btn secondary" id="sync-all-btn" title="Write every commitment not yet in your Google Sheet, in one go">Sync all to sheet</button>
+                    <button class="btn secondary" id="upload-transcript-btn">Upload transcript</button>
+                    <button class="btn secondary" id="seed-demo-btn">Load demo meeting</button>
+                    <button class="btn danger-outline" id="clear-tasks-btn">Clear tasks</button>
+                </div>
+            </div>
+
+            <div id="commitments-wrap">
+                <div class="table-card" id="table-card" style="display:none;">
+                    <table id="commitments-table">
+                        <thead>
+                            <tr>
+                                <th>Task</th>
+                                <th>Meeting</th>
+                                <th>Owner</th>
+                                <th>Due</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="commitments-body"></tbody>
+                    </table>
+                </div>
+                <div class="empty-state" id="empty-state" style="display:none;">
+                    <div>No commitments yet.</div>
+                    <button class="btn" id="empty-seed-btn">Load a demo meeting to see how it works</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- detail modal -->
+<div class="modal-backdrop" id="modal-backdrop">
+    <div class="modal">
+        <button class="modal-close" id="modal-close">&times;</button>
+        <h2 id="modal-task"></h2>
+        <div id="modal-meeting-title" style="color:var(--text-muted); font-size:13px;"></div>
+        <div class="quote" id="modal-quote"></div>
+        <div class="modal-meta">
+            <div>
+                <div class="label">Owner</div>
+                <div id="modal-owner"></div>
+            </div>
+            <div>
+                <div class="label">Due date</div>
+                <div id="modal-due"></div>
+            </div>
+            <div>
+                <div class="label">Extraction confidence</div>
+                <div id="modal-confidence"></div>
+            </div>
+            <div>
+                <div class="label">Status</div>
+                <select id="modal-status">
+                    <option value="pending">Pending</option>
+                    <option value="in_progress">In progress</option>
+                    <option value="done">Done</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="section-title">Edit details</div>
+        <form id="edit-task-form" style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:18px;">
+            <div style="grid-column:1/-1;"><label for="edit-task">Task</label><input id="edit-task" required style="width:100%;"></div>
+            <div><label for="edit-owner">Owner name</label><input id="edit-owner" required style="width:100%;"></div>
+            <div><label for="edit-due">Due date</label><input id="edit-due" type="date" style="width:100%;"></div>
+            <div style="grid-column:1/-1; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                <button type="submit" class="btn secondary">Save changes</button>
+                <span style="font-size:12px; color:var(--text-faint);" id="edit-task-note">A changed owner is matched to People again unless you set the email by hand.</span>
+            </div>
+        </form>
+
+        <div class="section-title">Owner email</div>
+        <div id="modal-owner-match" style="font-size:12.5px; color:var(--text-muted); margin:-6px 0 8px;"></div>
+        <div class="modal-actions" style="margin-top:0;">
+            <input id="modal-owner-email" type="email" list="people-emails" placeholder="name@company.com" style="flex:1; min-width:220px;">
+            <datalist id="people-emails"></datalist>
+            <button class="btn secondary" id="save-owner-email-btn">Save email</button>
+        </div>
+
+        <div class="section-title" style="margin-top:22px;">Nudge history</div>
+        <div class="nudge-history" id="modal-nudge-history"></div>
+
+        <div class="modal-actions">
+            <select id="nudge-channel"></select>
+            <button class="btn" id="send-nudge-btn">Send nudge now</button>
+            <span style="font-size:12px; color:var(--text-faint);" id="nudge-note"></span>
+        </div>
+
+        <div class="section-title" style="margin-top:22px;">Task tracker sync</div>
+        <div id="modal-external-ref" style="font-size:12px; color:var(--text-faint); margin-bottom:6px;"></div>
+        <div class="nudge-history" id="modal-tracker-history"></div>
+
+        <div class="modal-actions" id="modal-tracker-actions">
+            <button class="btn secondary" id="sync-tracker-btn">Sync to tracker</button>
+            <span style="font-size:12px; color:var(--text-faint);" id="modal-tracker-note">Mock only — no request actually sent</span>
+        </div>
+
+        <div class="modal-actions" id="modal-simulate-actions" style="margin-top:0;">
+            <select id="simulate-status">
+                <option value="pending">Pending</option>
+                <option value="in_progress">In progress</option>
+                <option value="done">Done</option>
+            </select>
+            <button class="btn secondary" id="simulate-inbound-btn">Simulate update from tracker</button>
+            <span style="font-size:12px; color:var(--text-faint);">Two-way test — pretends the tracker just pushed this status to us</span>
+        </div>
+    </div>
+</div>
+
+<!-- meeting detail / add-commitment modal -->
+<div class="modal-backdrop" id="meeting-modal-backdrop">
+    <div class="modal" style="max-width:640px;">
+        <button class="modal-close" id="meeting-modal-close">&times;</button>
+        <h2 id="meeting-modal-title"></h2>
+        <div id="meeting-modal-meta" style="font-size:13px; color:var(--text-muted); margin-bottom:10px;"></div>
+        <div class="quote" id="meeting-modal-transcript" style="max-height:160px; overflow-y:auto; white-space:pre-wrap;"></div>
+
+        <div class="section-title" style="margin-top:20px;">Commitments in this meeting</div>
+        <div class="nudge-history" id="meeting-modal-commitments"></div>
+
+        <div class="modal-actions" style="margin-top:10px;">
+            <button class="btn secondary" id="extract-commitments-btn">Extract commitments</button>
+            <span style="font-size:12px; color:var(--text-faint);" id="extract-note">Re-runs extraction over this meeting's transcript, with the engine chosen on the AI extraction page</span>
+        </div>
+        <div class="modal-actions" style="margin-top:10px;">
+            <button class="btn danger-outline chip-btn" id="clear-meeting-tasks-btn">Clear this meeting's tasks</button>
+            <button class="btn danger-outline chip-btn" id="delete-meeting-btn">Delete meeting</button>
+        </div>
+
+        <div class="section-title" style="margin-top:20px;">Add a commitment</div>
+        <p style="font-size:12.5px; color:var(--text-faint); margin:-6px 0 12px;">Missed something, or this meeting has no saved transcript? Add it by hand.</p>
+        <form id="add-commitment-form" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+            <div style="grid-column:1/-1;">
+                <label for="ac-task">Task</label>
+                <input id="ac-task" required style="width:100%;">
+            </div>
+            <div>
+                <label for="ac-owner">Owner name</label>
+                <input id="ac-owner" required style="width:100%;">
+            </div>
+            <div>
+                <label for="ac-owner-email">Owner email (optional)</label>
+                <input id="ac-owner-email" type="email" style="width:100%;">
+            </div>
+            <div>
+                <label for="ac-due">Due date</label>
+                <input id="ac-due" type="date" style="width:100%;">
+            </div>
+            <div>
+                <label for="ac-quote">Source quote (optional)</label>
+                <input id="ac-quote" style="width:100%;">
+            </div>
+            <div style="grid-column:1/-1;">
+                <button type="submit" class="btn secondary">Add commitment</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- upload transcript modal -->
+<div class="modal-backdrop" id="upload-modal-backdrop">
+    <div class="modal">
+        <button class="modal-close" id="upload-modal-close">&times;</button>
+        <h2>Upload a transcript</h2>
+        <p style="font-size:12.5px; color:var(--text-faint); margin:4px 0 14px;">
+            Commitments are extracted automatically in the background — by the built-in model, or by the AI engine you chose on the
+            AI extraction page. Word (.docx) and PDF files are converted to text first; a scanned PDF without a text layer can't be read.
+        </p>
+        <form id="upload-form" style="display:grid; gap:14px;">
+            <div>
+                <label for="upload-title">Meeting title</label>
+                <input id="upload-title" required style="width:100%;">
+            </div>
+            <div>
+                <label for="upload-date">Meeting date</label>
+                <input id="upload-date" type="date" style="width:100%;">
+            </div>
+            <div>
+                <label for="upload-file">Upload a file — .txt, .docx or .pdf (optional, up to 20 MB)</label>
+                <input id="upload-file" type="file" accept=".txt,.docx,.pdf,.vtt,.srt,.md,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" style="width:100%;">
+            </div>
+            <div>
+                <label for="upload-text">Or paste the transcript</label>
+                <textarea id="upload-text" rows="7" style="width:100%;"></textarea>
+            </div>
+            <button type="submit" class="btn" style="justify-self:start;">Save meeting</button>
+        </form>
+    </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/app.js"></script>
+<script>
+let currentCommitmentId = null;
+let allCommitments = [];
+let knownMeetingIds = null;
+let newMeetingIds = new Set();
+let meetingsById = new Map();
+// The meeting whose tasks are shown: a meeting id, or "all". Remembered per
+// browser; defaults to the most recent meeting.
+const SELECTED_KEY = "ct-selected-meeting";
+let selectedMeeting = null;
+let extractionStates = new Map();   // meeting id -> last seen extraction_status
+const MEETING_POLL_INTERVAL_MS = 8000;
+
+function loadSelection() {
+    try { return localStorage.getItem(SELECTED_KEY); } catch (e) { return null; }
+}
+
+function saveSelection(value) {
+    try { localStorage.setItem(SELECTED_KEY, String(value)); } catch (e) { /* ignore */ }
+}
+
+function selectMeeting(value) {
+    selectedMeeting = value === "all" ? "all" : Number(value);
+    saveSelection(selectedMeeting);
+    loadAll();
+}
+
+function extractionBadge(m) {
+    if (m.extraction_status === "queued" || m.extraction_status === "running") {
+        return '<span class="badge extracting">Extracting…</span>';
+    }
+    if (m.extraction_status === "failed") {
+        return `<span class="badge extract-failed" title="${escapeHtml(m.extraction_error || "")}">Extraction failed</span>`;
+    }
+    return "";
+}
+
+function renderMeetings(meetings) {
+    const list = document.getElementById("meetings-list");
+    document.getElementById("clear-meetings-btn").style.display = meetings.length ? "" : "none";
+    if (meetings.length === 0) {
+        list.innerHTML = '<div style="color:var(--text-muted); font-size:14px;">No meetings yet.</div>';
+        return;
+    }
+    const total = meetings.reduce((n, m) => n + (m.commitment_count || 0), 0);
+    list.innerHTML = `
+        <div class="meeting-chip meeting-chip-clickable meeting-chip-all${selectedMeeting === "all" ? " selected" : ""}" data-select="all">
+            <div class="meeting-chip-main">All meetings <span class="badge count">${total} task${total === 1 ? "" : "s"}</span></div>
+        </div>` + meetings.map(m => `
+        <div class="meeting-chip meeting-chip-clickable${newMeetingIds.has(m.id) ? " meeting-chip-new" : ""}${selectedMeeting === m.id ? " selected" : ""}" data-select="${m.id}">
+            <div class="meeting-chip-main">
+                <strong>${escapeHtml(m.title)}</strong>
+                <span class="meeting-date"> · ${formatDate(m.meeting_date)} · ${escapeHtml(m.source)}</span>
+                <span class="badge count">${m.commitment_count} task${m.commitment_count === 1 ? "" : "s"}</span>
+                ${m.source === "live" ? `<span class="badge live-capture">Live capture${m.transcript_provider ? " · " + escapeHtml(m.transcript_provider) : ""}</span>` : ""}
+                ${extractionBadge(m)}
+            </div>
+            <div class="chip-actions">
+                <button class="btn secondary chip-btn" data-details="${m.id}">Details</button>
+            </div>
+        </div>
+    `).join("");
+    list.querySelectorAll("[data-select]").forEach(chip => {
+        chip.addEventListener("click", (e) => {
+            if (e.target.closest("[data-details]")) return;
+            selectMeeting(chip.dataset.select);
+        });
+    });
+    list.querySelectorAll("[data-details]").forEach(btn => {
+        btn.addEventListener("click", () => openMeetingModal(parseInt(btn.dataset.details, 10)));
+    });
+}
+
+function renderTaskHeading() {
+    const heading = document.getElementById("tasks-heading");
+    const clearBtn = document.getElementById("clear-tasks-btn");
+    const m = selectedMeeting !== "all" ? meetingsById.get(selectedMeeting) : null;
+    heading.textContent = m ? `Tasks from "${m.title}"` : "Tasks from all meetings";
+    clearBtn.textContent = m ? "Clear this meeting's tasks" : "Clear all tasks";
+    clearBtn.style.display = allCommitments.length ? "" : "none";
+}
+
+function populateOwnerFilter(commitments) {
+    const select = document.getElementById("filter-owner");
+    const owners = [...new Set(commitments.map(c => c.owner_name))].sort();
+    const current = select.value;
+    select.innerHTML = '<option value="">All owners</option>' +
+        owners.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join("");
+    select.value = current;
+}
+
+function renderCommitments(commitments) {
+    const tableCard = document.getElementById("table-card");
+    const body = document.getElementById("commitments-body");
+    const empty = document.getElementById("empty-state");
+
+    if (commitments.length === 0) {
+        tableCard.style.display = "none";
+        empty.style.display = "block";
+        const m = selectedMeeting !== "all" ? meetingsById.get(selectedMeeting) : null;
+        empty.querySelector("div").textContent = !m
+            ? "No commitments yet."
+            : (m.extraction_status === "queued" || m.extraction_status === "running")
+            ? `Extracting commitments from "${m.title}"… they'll appear here automatically.`
+            : `No commitments in "${m.title}" yet — open its details to extract or add one.`;
+        document.getElementById("empty-seed-btn").style.display = meetingsById.size ? "none" : "";
+        return;
+    }
+    tableCard.style.display = "block";
+    empty.style.display = "none";
+
+    body.innerHTML = commitments.map(c => `
+        <tr class="row-clickable" data-id="${c.id}">
+            <td>${escapeHtml(c.task_text)}</td>
+            <td>${escapeHtml(c.meeting_title)}</td>
+            <td>${escapeHtml(c.owner_name)}${c.owner_email
+                ? `<div style="font-size:11.5px; color:var(--text-faint);">${escapeHtml(c.owner_email)}</div>`
+                : c.owner_match === "ambiguous"
+                ? '<div style="font-size:11.5px; color:var(--chart-pending);">shared name — pick email</div>'
+                : ""}</td>
+            <td>${formatDate(c.due_date)}</td>
+            <td>
+                <span class="badge status-${c.status}">${STATUS_LABELS[c.status]}</span>
+                ${c.is_overdue ? '<span class="badge overdue">Overdue</span>' : ""}
+            </td>
+        </tr>
+    `).join("");
+
+    body.querySelectorAll("tr").forEach(row => {
+        row.addEventListener("click", () => openModal(parseInt(row.dataset.id, 10)));
+    });
+}
+
+function renderStatusSummary(commitments) {
+    const counts = { pending: 0, in_progress: 0, done: 0 };
+    commitments.forEach(c => { counts[c.status] = (counts[c.status] || 0) + 1; });
+    const total = commitments.length;
+
+    document.getElementById("stat-pending").textContent = counts.pending;
+    document.getElementById("stat-in_progress").textContent = counts.in_progress;
+    document.getElementById("stat-done").textContent = counts.done;
+
+    const bar = document.getElementById("status-bar");
+    if (total === 0) {
+        bar.innerHTML = '<div class="status-bar-empty" title="No commitments yet"></div>';
+        return;
+    }
+    const segments = [
+        { key: "pending", label: "Pending", color: "var(--chart-pending)" },
+        { key: "in_progress", label: "In progress", color: "var(--chart-progress)" },
+        { key: "done", label: "Done", color: "var(--chart-done)" },
+    ];
+    bar.innerHTML = segments
+        .filter(s => counts[s.key] > 0)
+        .map(s => {
+            const pct = Math.round((counts[s.key] / total) * 100);
+            return `<div class="status-bar-seg" style="flex-basis:${pct}%; background:${s.color};" title="${s.label}: ${counts[s.key]} (${pct}%)"></div>`;
+        })
+        .join("");
+}
+
+function meetingParam() {
+    return selectedMeeting !== "all" && selectedMeeting != null ? `meeting_id=${selectedMeeting}` : "";
+}
+
+async function loadCommitments() {
+    const status = document.getElementById("filter-status").value;
+    const owner = document.getElementById("filter-owner").value;
+    const params = new URLSearchParams(meetingParam());
+    if (status) params.set("status", status);
+    if (owner) params.set("owner", owner);
+    allCommitments = await api(`/api/commitments?${params.toString()}`);
+    renderCommitments(allCommitments);
+    renderTaskHeading();
+}
+
+function announceFinishedExtractions(meetings) {
+    meetings.forEach(m => {
+        const before = extractionStates.get(m.id);
+        if ((before === "queued" || before === "running") && m.extraction_status === "succeeded") {
+            toast(`"${m.title}": ${m.commitment_count} commitment${m.commitment_count === 1 ? "" : "s"} extracted`);
+        } else if ((before === "queued" || before === "running") && m.extraction_status === "failed") {
+            toast(`"${m.title}": extraction failed — ${m.extraction_error || "see Background jobs"}`);
+        }
+        extractionStates.set(m.id, m.extraction_status);
+    });
+}
+
+async function loadAll() {
+    const meetings = await api("/api/meetings");
+    meetingsById = new Map(meetings.map(m => [m.id, m]));
+
+    if (knownMeetingIds === null) {
+        knownMeetingIds = new Set(meetings.map(m => m.id));
+        newMeetingIds = new Set();
+        meetings.forEach(m => extractionStates.set(m.id, m.extraction_status));
+    } else {
+        const arrivedLive = meetings.filter(m => m.source === "live" && !knownMeetingIds.has(m.id));
+        if (arrivedLive.length > 0) {
+            toast(arrivedLive.length === 1
+                ? `New meeting captured live: "${arrivedLive[0].title}"`
+                : `${arrivedLive.length} new meetings captured live`);
+        }
+        newMeetingIds = new Set(arrivedLive.map(m => m.id));
+        knownMeetingIds = new Set(meetings.map(m => m.id));
+        announceFinishedExtractions(meetings);
+    }
+
+    // Keep the selection valid: a deleted meeting falls back to the newest one.
+    if (selectedMeeting == null) {
+        const stored = loadSelection();
+        selectedMeeting = stored === "all" ? "all" : Number(stored);
+    }
+    if (selectedMeeting !== "all" && !meetingsById.has(selectedMeeting)) {
+        selectedMeeting = meetings.length ? meetings[0].id : "all";
+    }
+
+    renderMeetings(meetings);
+    const scoped = await api(`/api/commitments?${meetingParam()}`);
+    populateOwnerFilter(scoped);
+    renderStatusSummary(scoped);
+    await loadCommitments();
+}
+
+function startMeetingPolling() {
+    // Pushed updates from the server (Server-Sent Events); falls back to
+    // polling every MEETING_POLL_INTERVAL_MS if the stream isn't available.
+    connectLiveEvents((kind, data) => {
+        if (kind === "commitment_status" && data.detail) toast(data.detail);
+        loadAll();
+        const modalOpen = document.getElementById("modal-backdrop").classList.contains("open");
+        if (modalOpen && currentCommitmentId != null
+                && (data.commitment_id === currentCommitmentId || kind === "nudge_sent" || kind === "poll")) {
+            openModal(currentCommitmentId);
+        }
+    }, { pollMs: MEETING_POLL_INTERVAL_MS });
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") loadAll();
+    });
+}
+
+async function openModal(id) {
+    const c = await api(`/api/commitments/${id}`);
+    currentCommitmentId = id;
+    document.getElementById("modal-task").textContent = c.task_text;
+    document.getElementById("modal-meeting-title").textContent = c.meeting_title;
+    document.getElementById("modal-quote").textContent = `"${c.source_quote}"`;
+    document.getElementById("modal-owner").textContent = c.owner_name;
+    document.getElementById("modal-due").textContent = formatDate(c.due_date) + (c.is_overdue ? " (overdue)" : "");
+    document.getElementById("modal-confidence").textContent = c.confidence_score != null
+        ? Math.round(c.confidence_score * 100) + "%"
+        : "—";
+    document.getElementById("modal-status").value = c.status;
+    document.getElementById("edit-task").value = c.task_text;
+    document.getElementById("edit-owner").value = c.owner_name;
+    document.getElementById("edit-due").value = c.due_date || "";
+    document.getElementById("edit-task-note").textContent = c.updated_at
+        ? `Last changed ${formatDateTime(c.updated_at)}. ${c.external_ref ? "Saving also updates the Google Sheet row (most recent edit wins)." : ""}`
+        : "A changed owner is matched to People again unless you set the email by hand.";
+
+    // owner email: auto-matched from the People directory, or set by hand
+    const matchText = {
+        auto: "Matched automatically from the People directory.",
+        manual: "Set by hand.",
+        ambiguous: `More than one person is called "${c.owner_name}" — choose the right email${c.owner_candidates.length ? ": " + c.owner_candidates.join(", ") : ""}.`,
+        none: `"${c.owner_name}" isn't in the People directory — add them there, or type their email here.`,
+    };
+    document.getElementById("modal-owner-match").textContent = matchText[c.owner_match]
+        || (c.owner_email ? "" : "No email yet — upload your team on the People page, or type it here.");
+    document.getElementById("modal-owner-email").value = c.owner_email || "";
+    try {
+        const { people } = await api("/api/people");
+        const candidates = new Set(c.owner_candidates);
+        const ordered = [...people].sort((a, b) => candidates.has(b.email) - candidates.has(a.email));
+        document.getElementById("people-emails").innerHTML = ordered.map(p =>
+            `<option value="${escapeHtml(p.email)}">${escapeHtml(`${p.first_name} ${p.last_name}`.trim())}</option>`).join("");
+    } catch (e) { /* suggestions are optional */ }
+
+    // nudge channels configured in Integrations
+    const channels = (await api("/api/nudge-settings")).filter(s => s.enabled);
+    const channelSelect = document.getElementById("nudge-channel");
+    channelSelect.innerHTML = channels.map(s =>
+        `<option value="${s.channel}">${escapeHtml(s.channel === "custom" ? (s.custom_name || "Custom") : s.channel)}</option>`).join("");
+    channelSelect.style.display = channels.length ? "" : "none";
+    document.getElementById("send-nudge-btn").disabled = channels.length === 0;
+    document.getElementById("nudge-note").textContent = channels.length
+        ? (c.owner_email ? `Goes to ${c.owner_email}` : "Owner has no email — email and Slack DMs will be skipped")
+        : "No nudge channel set up — add one in Integrations";
+
+    const historyEl = document.getElementById("modal-nudge-history");
+    if (c.nudge_history.length === 0) {
+        historyEl.innerHTML = '<div class="nudge-history-empty">No nudges sent yet.</div>';
+    } else {
+        const statusText = { sent: "sent", failed: "failed", skipped: "skipped", mock_sent: "mock, not sent" };
+        historyEl.innerHTML = c.nudge_history.map(n => `
+            <div class="nudge-history-item">${formatDateTime(n.triggered_at)} — ${escapeHtml(n.channel)}
+                · ${statusText[n.status] || escapeHtml(n.status)}${n.reason && n.reason !== "test" ? ` (${escapeHtml(n.reason.replace("_", " "))})` : ""}
+                ${n.detail ? `<div style="font-size:12px; color:var(--text-faint);">${escapeHtml(n.detail)}</div>` : ""}</div>
+        `).join("");
+    }
+
+    const trackerHistoryEl = document.getElementById("modal-tracker-history");
+    if (c.tracker_history.length === 0) {
+        trackerHistoryEl.innerHTML = '<div class="nudge-history-empty">No syncs yet.</div>';
+    } else {
+        trackerHistoryEl.innerHTML = c.tracker_history.map(t => `
+            <div class="nudge-history-item">${t.direction === "inbound" ? "↓ from tracker" : "↑ to tracker"} · ${formatDateTime(t.triggered_at)} — ${escapeHtml(t.detail)}</div>
+        `).join("");
+    }
+    document.getElementById("modal-external-ref").textContent = c.external_ref
+        ? `Linked to tracker as ${c.external_ref}`
+        : "Not synced to a tracker yet";
+
+    const syncBtn = document.getElementById("sync-tracker-btn");
+    const trackerNote = document.getElementById("modal-tracker-note");
+    syncBtn.disabled = !c.tracker_configured;
+    trackerNote.textContent = !c.tracker_configured
+        ? "No task tracker connected — set one up in Integrations"
+        : c.tracker_provider === "google_sheets"
+        ? "Writes a real row to your Google Sheet"
+        : "Mock only — no request actually sent";
+
+    const simulateBtn = document.getElementById("simulate-inbound-btn");
+    simulateBtn.disabled = !c.external_ref;
+    document.getElementById("simulate-status").disabled = !c.external_ref;
+
+    document.getElementById("modal-backdrop").classList.add("open");
+}
+
+function closeModal() {
+    document.getElementById("modal-backdrop").classList.remove("open");
+    currentCommitmentId = null;
+}
+
+let currentMeetingId = null;
+
+async function openMeetingModal(id) {
+    const m = await api(`/api/meetings/${id}`);
+    currentMeetingId = id;
+    document.getElementById("meeting-modal-title").textContent = m.title;
+    const state = (meetingsById.get(id) || {}).extraction_status;
+    document.getElementById("meeting-modal-meta").textContent = `${formatDate(m.meeting_date)} · ${m.source}`
+        + (state === "queued" || state === "running" ? " · extracting commitments…" : state === "failed" ? " · last extraction failed" : "");
+    document.getElementById("meeting-modal-transcript").textContent = m.transcript_excerpt
+        ? m.transcript_excerpt
+        : "No transcript text saved for this meeting.";
+
+    const listEl = document.getElementById("meeting-modal-commitments");
+    if (m.commitments.length === 0) {
+        listEl.innerHTML = '<div class="nudge-history-empty">No commitments yet.</div>';
+    } else {
+        listEl.innerHTML = m.commitments.map(c => `
+            <div class="nudge-history-item">
+                <strong>${escapeHtml(c.task_text)}</strong> — ${escapeHtml(c.owner_name)}
+                · <span class="badge status-${c.status}">${STATUS_LABELS[c.status]}</span>
+                ${c.is_overdue ? '<span class="badge overdue">Overdue</span>' : ""}
+            </div>
+        `).join("");
+    }
+
+    document.getElementById("meeting-modal-backdrop").classList.add("open");
+}
+
+function closeMeetingModal() {
+    document.getElementById("meeting-modal-backdrop").classList.remove("open");
+    currentMeetingId = null;
+    document.getElementById("add-commitment-form").reset();
+}
+
+function closeUploadModal() {
+    document.getElementById("upload-modal-backdrop").classList.remove("open");
+    document.getElementById("upload-form").reset();
+}
+
+async function init() {
+    initThemeToggle();
+    await requireIdentified();
+    await initNav();
+    await loadAll();
+    startMeetingPolling();
+
+    document.getElementById("filter-status").addEventListener("change", loadCommitments);
+    document.getElementById("filter-owner").addEventListener("change", loadCommitments);
+
+    document.getElementById("modal-close").addEventListener("click", closeModal);
+    document.getElementById("modal-backdrop").addEventListener("click", (e) => {
+        if (e.target.id === "modal-backdrop") closeModal();
+    });
+
+    document.getElementById("modal-status").addEventListener("change", async (e) => {
+        const result = await api(`/api/commitments/${currentCommitmentId}`, { method: "PATCH", body: { status: e.target.value } });
+        toast(result.tracker_sync_error ? `Status updated here, but not in the sheet: ${result.tracker_sync_error}` : "Status updated");
+        await loadAll();
+    });
+
+    document.getElementById("edit-task-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        try {
+            const result = await api(`/api/commitments/${currentCommitmentId}`, { method: "PATCH", body: {
+                task_text: document.getElementById("edit-task").value.trim(),
+                owner_name: document.getElementById("edit-owner").value.trim(),
+                due_date: document.getElementById("edit-due").value,
+            } });
+            toast(result.changed.length === 0 ? "Nothing changed"
+                : result.tracker_sync_error ? `Saved here, but not in the sheet: ${result.tracker_sync_error}`
+                : "Saved");
+            await openModal(currentCommitmentId);
+            await loadAll();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    document.getElementById("send-nudge-btn").addEventListener("click", async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        try {
+            const result = await api(`/api/commitments/${currentCommitmentId}/send-test-nudge`, {
+                method: "POST",
+                body: { channel: document.getElementById("nudge-channel").value },
+            });
+            toast(result.status === "sent" ? `Nudge sent — ${result.detail}` : `Nudge ${result.status}: ${result.detail}`);
+            await openModal(currentCommitmentId);
+        } catch (err) {
+            toast(err.message);
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    document.getElementById("save-owner-email-btn").addEventListener("click", async () => {
+        const value = document.getElementById("modal-owner-email").value.trim();
+        try {
+            await api(`/api/commitments/${currentCommitmentId}`, { method: "PATCH", body: { owner_email: value } });
+            toast(value ? `Owner email set to ${value}` : "Owner email cleared — it will be matched from People again");
+            await openModal(currentCommitmentId);
+            await loadAll();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    document.getElementById("sync-tracker-btn").addEventListener("click", async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        try {
+            const result = await api(`/api/commitments/${currentCommitmentId}/sync-tracker`, { method: "POST" });
+            toast(result.status === "synced" ? result.detail : "Tracker sync logged (mock — nothing was actually sent)");
+            await openModal(currentCommitmentId);
+        } catch (err) {
+            toast(err.message);
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    document.getElementById("simulate-inbound-btn").addEventListener("click", async () => {
+        const status = document.getElementById("simulate-status").value;
+        try {
+            await api(`/api/commitments/${currentCommitmentId}/simulate-inbound-update`, {
+                method: "POST",
+                body: { status },
+            });
+            toast("Simulated an incoming status update from the tracker");
+            await openModal(currentCommitmentId);
+            await loadAll();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    async function seedDemo() {
+        await api("/api/meetings/seed-demo", { method: "POST" });
+        toast("Demo meetings loaded");
+        selectedMeeting = "all";
+        saveSelection("all");
+        await loadAll();
+    }
+    document.getElementById("seed-demo-btn").addEventListener("click", seedDemo);
+    document.getElementById("empty-seed-btn").addEventListener("click", seedDemo);
+
+    // ---------- meeting detail / add commitment ----------
+
+    document.getElementById("meeting-modal-close").addEventListener("click", closeMeetingModal);
+    document.getElementById("meeting-modal-backdrop").addEventListener("click", (e) => {
+        if (e.target.id === "meeting-modal-backdrop") closeMeetingModal();
+    });
+
+    document.getElementById("add-commitment-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        try {
+            await api("/api/commitments", {
+                method: "POST",
+                body: {
+                    meeting_id: currentMeetingId,
+                    task_text: document.getElementById("ac-task").value.trim(),
+                    owner_name: document.getElementById("ac-owner").value.trim(),
+                    owner_email: document.getElementById("ac-owner-email").value.trim(),
+                    due_date: document.getElementById("ac-due").value,
+                    source_quote: document.getElementById("ac-quote").value.trim(),
+                },
+            });
+            toast("Commitment added");
+            document.getElementById("add-commitment-form").reset();
+            await openMeetingModal(currentMeetingId);
+            await loadAll();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    // ---------- upload transcript ----------
+
+    document.getElementById("upload-transcript-btn").addEventListener("click", () => {
+        document.getElementById("upload-modal-backdrop").classList.add("open");
+    });
+    document.getElementById("upload-modal-close").addEventListener("click", closeUploadModal);
+    document.getElementById("upload-modal-backdrop").addEventListener("click", (e) => {
+        if (e.target.id === "upload-modal-backdrop") closeUploadModal();
+    });
+
+    document.getElementById("upload-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const title = document.getElementById("upload-title").value.trim();
+        const meeting_date = document.getElementById("upload-date").value;
+        const file = document.getElementById("upload-file").files[0];
+        const pastedText = document.getElementById("upload-text").value.trim();
+
+        // The file picker's accept list is only a hint — check the type here
+        // for a clear message; the server converts .docx/.pdf to text.
+        const SUPPORTED = [".txt", ".docx", ".pdf", ".vtt", ".srt", ".md"];
+        if (file && !SUPPORTED.some(ext => file.name.toLowerCase().endsWith(ext))) {
+            toast(`"${file.name}" isn't supported — upload a .txt, .docx or .pdf file, or paste the text below.`);
+            return;
+        }
+
+        let body;
+        if (file) {
+            body = new FormData();
+            body.append("title", title);
+            body.append("meeting_date", meeting_date);
+            body.append("file", file);
+        } else {
+            body = { title, meeting_date, transcript_excerpt: pastedText };
+        }
+
+        const submitBtn = e.target.querySelector("button[type=submit]");
+        submitBtn.disabled = true;
+        submitBtn.textContent = file ? "Reading file…" : "Saving…";
+        try {
+            const result = await api("/api/meetings", { method: "POST", body });
+            const from = result.file_kind && result.file_kind !== "text" ? ` (${result.file_kind.toUpperCase()} converted to text)` : "";
+            if (result.extraction === "queued") {
+                extractionStates.set(result.id, "queued");
+                toast(`Meeting saved${from} — extracting commitments in the background`);
+            } else if (result.extraction_error) {
+                toast(`Meeting saved${from} — extraction unavailable (${result.extraction_error})`);
+            } else if (result.tracker_sync_error) {
+                toast(`Extracted ${result.commitments_extracted} commitment(s), but the sheet sync failed: ${result.tracker_sync_error}`);
+            } else if (result.extraction) {
+                const plural = result.commitments_extracted === 1 ? "" : "s";
+                toast(`Meeting saved${from} — ${result.commitments_extracted} commitment${plural} extracted`
+                    + (result.extraction_engine ? ` by ${result.extraction_engine}` : ""));
+            } else {
+                toast("Meeting saved — no transcript text, so add commitments by hand from its details");
+            }
+            closeUploadModal();
+            selectedMeeting = result.id;   // show the new meeting's tasks
+            saveSelection(result.id);
+            await loadAll();
+        } catch (err) {
+            toast(err.message);
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Save meeting";
+        }
+    });
+
+    // ---------- clearing ----------
+
+    document.getElementById("clear-tasks-btn").addEventListener("click", async () => {
+        const m = selectedMeeting !== "all" ? meetingsById.get(selectedMeeting) : null;
+        const question = m
+            ? `Delete all ${allCommitments.length} task(s) from "${m.title}"? The meeting and its transcript stay, so you can extract again.`
+            : "Delete every task from every meeting? Meetings and transcripts stay. Rows already in your Google Sheet aren't touched.";
+        if (!confirm(question)) return;
+        try {
+            const r = await api("/api/commitments/clear", { method: "POST", body: { confirm: true, meeting_id: m ? m.id : null } });
+            toast(`Deleted ${r.commitments_deleted} task${r.commitments_deleted === 1 ? "" : "s"}`);
+            await loadAll();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    document.getElementById("clear-meetings-btn").addEventListener("click", async () => {
+        if (!confirm(`Delete all ${meetingsById.size} meeting(s), their transcripts and all their tasks? This can't be undone. `
+                + "Rows already in your Google Sheet aren't touched.")) return;
+        try {
+            const r = await api("/api/meetings/clear", { method: "POST", body: { confirm: true } });
+            toast(`Deleted ${r.meetings_deleted} meeting(s) and ${r.commitments_deleted} task(s)`);
+            selectedMeeting = "all";
+            saveSelection("all");
+            await loadAll();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    document.getElementById("clear-meeting-tasks-btn").addEventListener("click", async () => {
+        const m = meetingsById.get(currentMeetingId);
+        if (!m || !confirm(`Delete all tasks from "${m.title}"? The meeting and its transcript stay.`)) return;
+        try {
+            const r = await api("/api/commitments/clear", { method: "POST", body: { confirm: true, meeting_id: m.id } });
+            toast(`Deleted ${r.commitments_deleted} task${r.commitments_deleted === 1 ? "" : "s"}`);
+            await openMeetingModal(m.id);
+            await loadAll();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    document.getElementById("delete-meeting-btn").addEventListener("click", async () => {
+        const m = meetingsById.get(currentMeetingId);
+        if (!m || !confirm(`Delete "${m.title}", its transcript and all its tasks? This can't be undone.`)) return;
+        try {
+            await api(`/api/meetings/${m.id}`, { method: "DELETE" });
+            toast(`Deleted "${m.title}"`);
+            closeMeetingModal();
+            await loadAll();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    document.getElementById("sync-all-btn").addEventListener("click", async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        try {
+            const result = await api("/api/tracker/sync-all", { method: "POST" });
+            toast(result.synced > 0
+                ? `Wrote ${result.synced} commitment${result.synced === 1 ? "" : "s"} to your Google Sheet`
+                : "Everything is already in your Google Sheet");
+            await loadAll();
+        } catch (err) {
+            toast(err.message);
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    // ---------- extract commitments (meeting modal) ----------
+
+    document.getElementById("extract-commitments-btn").addEventListener("click", async () => {
+        try {
+            const result = await api(`/api/meetings/${currentMeetingId}/extract-commitments`, { method: "POST" });
+            if (result.extraction === "queued") {
+                extractionStates.set(currentMeetingId, "queued");
+                toast("Extraction started in the background — new commitments appear when it finishes");
+            } else {
+                toast(result.commitments_extracted > 0
+                    ? `Extracted ${result.commitments_extracted} new commitment${result.commitments_extracted === 1 ? "" : "s"}`
+                        + (result.extraction_engine ? ` by ${result.extraction_engine}` : "")
+                    : "No new commitments detected in this transcript");
+            }
+            await openMeetingModal(currentMeetingId);
+            await loadAll();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+}
+
+init();
+</script>
+</body>
+</html>

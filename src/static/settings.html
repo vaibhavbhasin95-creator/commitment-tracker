@@ -1,0 +1,1350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Integrations — Commitment Tracker</title>
+<script>
+(function () {
+    try {
+        var t = localStorage.getItem("ct-theme");
+        if (!t) t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div class="app-shell">
+    <aside class="sidebar">
+        <div class="sidebar-brand"><span class="logo-dot"></span>Commitment Tracker</div>
+        <nav class="sidebar-nav">
+            <a href="/dashboard" class="sidebar-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"></rect><rect x="14" y="3" width="7" height="5" rx="1.5"></rect><rect x="14" y="12" width="7" height="9" rx="1.5"></rect><rect x="3" y="16" width="7" height="5" rx="1.5"></rect></svg>
+                Dashboard
+            </a>
+            <a href="/people" class="sidebar-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                People
+            </a>
+            <a href="/settings" class="sidebar-link active">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                Integrations
+            </a>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="avatar" id="nav-avatar"></div>
+            <div class="sidebar-footer-email" id="nav-email"></div>
+            <button class="icon-btn" id="logout-btn" title="Log out" aria-label="Log out">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+            </button>
+        </div>
+    </aside>
+
+    <div class="main">
+        <div class="topbar">
+            <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg></button>
+        </div>
+
+        <div class="content" style="max-width: 720px;">
+
+            <h2 class="page-heading">Saved right now</h2>
+            <p class="view-note">What this account has configured, read fresh from the server each time you open this page.
+                Saved passwords and keys are never shown in full — fields for them stay empty and keep the saved value if left blank.</p>
+            <div class="config-summary" id="config-summary"></div>
+
+            <h2 class="page-heading">Nudges</h2>
+            <div class="mock-notice">
+                Nudges are real: they go to each task owner's email address, which comes from the
+                <a href="/people">People</a> directory (or is set by hand on the task). Use "Send test" on a saved
+                channel to check it works, then switch on automatic nudges below. Secrets you save here
+                are never shown again in full.
+            </div>
+
+            <div class="card">
+                <div class="section-title">Add / update a nudge channel</div>
+                <div class="saved-banner" id="channel-saved-banner"></div>
+                <form class="settings-form" id="settings-form" style="max-width:none;">
+                    <div style="max-width:420px;">
+                        <label for="channel">Channel</label>
+                        <select id="channel" required>
+                            <option value="slack">Slack</option>
+                            <option value="teams">Microsoft Teams</option>
+                            <option value="email">Email</option>
+                            <option value="custom">Custom app…</option>
+                        </select>
+                    </div>
+
+                    <details class="help-steps channel-help" id="channel-help-slack">
+                        <summary>Slack: message each owner directly, or post in one channel</summary>
+                        <ol>
+                            <li><strong>Direct message to each owner (recommended):</strong> at <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> create an app for your workspace → OAuth &amp; Permissions → add the bot scopes <code style="display:inline;padding:1px 4px;">chat:write</code> and <code style="display:inline;padding:1px 4px;">users:read.email</code> → Install to Workspace → copy the <strong>Bot User OAuth Token</strong> (starts <code style="display:inline;padding:1px 4px;">xoxb-</code>) into the field below. Owners are found by their email, so their Slack email must match the People directory.</li>
+                            <li><strong>One shared channel instead:</strong> in the same app turn on Incoming Webhooks → Add New Webhook → pick the channel, and paste the <code style="display:inline;padding:1px 4px;">https://hooks.slack.com/...</code> URL. Messages name the owner but aren't private.</li>
+                            <li>Works on Slack's free plan.</li>
+                        </ol>
+                    </details>
+                    <details class="help-steps channel-help" id="channel-help-teams" style="display:none;">
+                        <summary>Teams: needs a Microsoft 365 work or school account</summary>
+                        <ol>
+                            <li><strong>Post in a channel:</strong> in Teams, open the channel's "..." menu → Workflows → "Post to a channel when a webhook request is received" → finish the steps and copy the URL it gives you into the field below.</li>
+                            <li><strong>Message each owner directly:</strong> in Power Automate, create a flow with the trigger "When a Teams webhook request is received" and the action "Post message in a chat or channel" (Post as: Flow bot, Post in: Chat with Flow bot), with Recipient set to <code style="display:inline;padding:1px 4px;">recipient_email</code> and Message set to <code style="display:inline;padding:1px 4px;">text</code> from the request body. Paste the flow's URL below.</li>
+                            <li>Personal (free) Teams accounts don't support Workflows, so they can't receive these.</li>
+                        </ol>
+                    </details>
+                    <details class="help-steps channel-help" id="channel-help-email" style="display:none;">
+                        <summary>Email: any SMTP server — Gmail works for free</summary>
+                        <ol>
+                            <li><strong>Gmail:</strong> turn on 2-Step Verification for the account, then create an <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">App password</a>. Use server <code style="display:inline;padding:1px 4px;">smtp.gmail.com</code>, port 587, STARTTLS, your Gmail address as user name and "from", and the 16-character app password (not your normal password). Gmail allows roughly 500 emails a day.</li>
+                            <li><strong>Microsoft 365 / Outlook:</strong> <code style="display:inline;padding:1px 4px;">smtp.office365.com</code>, port 587, STARTTLS — your admin must allow "Authenticated SMTP" for the mailbox.</li>
+                            <li><strong>Email services</strong> (SendGrid, Resend, Postmark…): use the SMTP host, port and credentials from their dashboard.</li>
+                        </ol>
+                    </details>
+
+                    <div id="email-fields" style="display:none;">
+                        <div style="display:grid; grid-template-columns: 2fr 1fr 1fr; gap:10px;">
+                            <div><label for="smtp-host">SMTP server</label><input type="text" id="smtp-host" placeholder="smtp.gmail.com"></div>
+                            <div><label for="smtp-port">Port</label><input type="text" id="smtp-port" placeholder="587"></div>
+                            <div><label for="smtp-security">Security</label>
+                                <select id="smtp-security"><option value="starttls">STARTTLS</option><option value="ssl">SSL/TLS</option><option value="none">None</option></select></div>
+                        </div>
+                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
+                            <div><label for="smtp-user">User name</label><input type="text" id="smtp-user" autocomplete="off" placeholder="you@gmail.com"></div>
+                            <div><label for="smtp-pass">Password / app password</label><input type="password" id="smtp-pass" autocomplete="new-password" placeholder=""></div>
+                        </div>
+                        <div style="margin-top:10px;"><label for="smtp-from">Send from</label><input type="email" id="smtp-from" placeholder="you@gmail.com"></div>
+                        <button type="button" class="btn secondary" id="gmail-preset-btn" style="margin-top:10px;">Fill in Gmail settings</button>
+
+                        <div class="section-title" style="margin-top:24px;">Reminder email draft</div>
+                        <p class="view-note" style="margin-top:-6px;">Write the reminder the way you'd send it. Placeholders are filled in for each task.
+                            Leave both fields blank to use the standard draft.</p>
+                        <div><label for="draft-subject">Subject</label><input type="text" id="draft-subject" style="width:100%;"></div>
+                        <div style="margin-top:10px;"><label for="draft-body">Body</label><textarea id="draft-body" rows="8" style="width:100%;"></textarea></div>
+                        <div style="font-size:12px; color:var(--text-faint); margin-top:4px;">Click to insert into the body:</div>
+                        <div class="placeholder-list" id="placeholder-list"></div>
+                        <div style="margin-top:12px; max-width:420px;"><label for="sender-name">Sign as</label>
+                            <input type="text" id="sender-name" placeholder="Your name (fills {sender_name})"></div>
+
+                        <div style="margin-top:16px;">
+                            <label><input type="checkbox" id="ai-tailor" style="width:auto; margin-right:6px;">Let AI tailor each email to the recipient's designation</label>
+                            <div style="font-size:12px; color:var(--text-faint); margin-top:4px; line-height:1.5;">
+                                AI keeps your facts and asks, and adjusts tone, formality, length and detail to the person's designation
+                                on the <a href="/people">People</a> page — brief and outcome-focused for a VP, clear next steps for an analyst,
+                                more guidance for an intern. It uses the engine and key saved on the
+                                <a href="/ai-extraction">AI extraction</a> page; if that's unavailable, your draft is sent as written.
+                                <span id="ai-engine-status"></span>
+                            </div>
+                        </div>
+
+                        <div style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; margin-top:14px;">
+                            <div><label for="preview-person">Preview for</label>
+                                <select id="preview-person" style="min-width:220px;"></select></div>
+                            <div><label for="preview-designation">or a designation</label>
+                                <input type="text" id="preview-designation" placeholder="e.g. Intern, CFO"></div>
+                            <button type="button" class="btn secondary" id="preview-email-btn">Preview email</button>
+                        </div>
+                        <div id="email-preview"></div>
+                    </div>
+
+                    <div id="channel-custom-block" style="display:none;">
+                        <div>
+                            <label for="custom-channel-name">App name</label>
+                            <input type="text" id="custom-channel-name" placeholder="e.g. Discord, Telegram, PagerDuty">
+                        </div>
+                        <button type="button" class="btn secondary" id="suggest-channel-steps-btn" style="margin-top:10px;">Suggest setup steps (AI)</button>
+                        <div id="channel-ai-steps" style="margin-top:10px;"></div>
+                    </div>
+
+                    <div id="webhook-block" style="max-width:420px;">
+                        <label for="webhook" id="webhook-label">Bot token or webhook URL</label>
+                        <input type="text" id="webhook" autocomplete="off" placeholder="xoxb-... or https://hooks.slack.com/services/...">
+                        <div id="webhook-hint" style="font-size:12px; color:var(--text-faint); margin-top:4px;"></div>
+                    </div>
+                    <div style="max-width:420px;">
+                        <label for="cadence">Nudge cadence</label>
+                        <select id="cadence" required>
+                            <option value="day_before">1 day before due</option>
+                            <option value="on_due">On the due date</option>
+                            <option value="daily_after_overdue">Daily once overdue</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label><input type="checkbox" id="enabled" checked style="width:auto; margin-right:6px;">Enabled</label>
+                    </div>
+                    <button type="submit" class="btn" style="justify-self:start;">Save channel</button>
+                </form>
+            </div>
+
+            <div class="saved-settings">
+                <div class="section-title">Your saved channels</div>
+                <div id="saved-list"></div>
+            </div>
+
+            <div class="card" style="margin-top:18px;">
+                <div class="section-title">Automatic nudges</div>
+                <label><input type="checkbox" id="auto-nudges" style="width:auto; margin-right:6px;">
+                    Send reminders automatically, following each enabled channel's cadence</label>
+                <div style="font-size:12px; color:var(--text-faint); margin-top:6px;">
+                    Checked every 15 minutes while the app is running. Each task gets at most one reminder per channel for
+                    "day before" and "on the due date", and one a day once overdue. Finished tasks are never nudged.
+                </div>
+                <div style="display:flex; gap:10px; align-items:center; margin-top:12px; flex-wrap:wrap;">
+                    <button type="button" class="btn secondary" id="run-nudges-btn">Send due reminders now</button>
+                    <span id="run-nudges-result" style="font-size:12.5px; color:var(--text-muted);"></span>
+                </div>
+                <div class="section-title" style="margin-top:16px;">Recent nudges</div>
+                <div class="nudge-history" id="nudge-activity"></div>
+            </div>
+
+            <h2 class="page-heading" style="margin-top:44px;">Task tracker</h2>
+            <div class="mock-notice">
+                Jira and Custom stay simulated here (no outbound call). <strong>Google Sheets is
+                real</strong>: syncing appends an actual row via the Sheets API, using a one-time
+                local OAuth login — see <code style="display:inline;padding:1px 4px;">python google_oauth_setup.py</code>.
+                If you don't connect a tracker, commitments are tracked in this app only, exactly as before.
+            </div>
+
+            <div class="card">
+                <div class="section-title">Connect where you already track tasks</div>
+                <div class="warn-banner" id="tracker-unreadable" style="display:none;"></div>
+                <form class="settings-form" id="tracker-form">
+                    <div>
+                        <label for="tracker-provider">Provider</label>
+                        <select id="tracker-provider">
+                            <option value="none">None — use built-in tracking</option>
+                            <option value="jira">Jira</option>
+                            <option value="google_sheets">Google Sheets</option>
+                            <option value="custom">Custom app…</option>
+                        </select>
+                    </div>
+
+                    <div id="tracker-fields-jira" class="tracker-fields" style="display:none;">
+                        <details class="help-steps">
+                            <summary>How to get your Jira details</summary>
+                            <ol>
+                                <li>Log in to Atlassian and go to <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener">API tokens</a>.</li>
+                                <li>Click "Create API token", name it, and copy it — that's the API token below.</li>
+                                <li>Your base URL is the address you use for Jira, e.g. <code style="display:inline;padding:1px 4px;">https://yourteam.atlassian.net</code>.</li>
+                                <li>Find your project key under Project Settings → Details (a short code like ENG or OPS).</li>
+                            </ol>
+                        </details>
+                        <div>
+                            <label for="jira-base-url">Jira base URL</label>
+                            <input type="text" id="jira-base-url" placeholder="https://yourteam.atlassian.net">
+                        </div>
+                        <div>
+                            <label for="jira-project-key">Project key</label>
+                            <input type="text" id="jira-project-key" placeholder="ENG">
+                        </div>
+                        <div>
+                            <label for="jira-email">Account email</label>
+                            <input type="email" id="jira-email" placeholder="you@company.com">
+                        </div>
+                        <div>
+                            <label for="jira-api-token">API token</label>
+                            <input type="text" id="jira-api-token" placeholder="Jira API token">
+                        </div>
+                    </div>
+
+                    <div id="tracker-fields-google_sheets" class="tracker-fields" style="display:none;">
+                        <details class="help-steps">
+                            <summary>How to get your Google Sheets details</summary>
+                            <ol>
+                                <li>In the <a href="https://console.cloud.google.com" target="_blank" rel="noopener">Google Cloud console</a>, create (or pick) a project and enable the "Google Sheets API" for it.</li>
+                                <li>Under Credentials, create an OAuth Client ID of type "Desktop app" and download its JSON — save it into the <code style="display:inline;padding:1px 4px;">commitment-tracker</code> folder (filename starting <code style="display:inline;padding:1px 4px;">client_secret_</code>).</li>
+                                <li>From a terminal in that folder, run <code style="display:inline;padding:1px 4px;">python google_oauth_setup.py</code> once — it opens a browser, you approve access, and it saves a local token. No further login needed after that.</li>
+                                <li>Create (or open) a Google Sheet under the same Google account and copy its spreadsheet ID from the URL — the long string between <code style="display:inline;padding:1px 4px;">/d/</code> and <code style="display:inline;padding:1px 4px;">/edit</code>.</li>
+                            </ol>
+                        </details>
+                        <div>
+                            <label for="sheets-id">Spreadsheet ID</label>
+                            <input type="text" id="sheets-id" placeholder="from the sheet's URL">
+                        </div>
+                        <div>
+                            <label><input type="checkbox" id="sheets-auto-sync" checked style="width:auto; margin-right:6px;">Sync automatically</label>
+                            <div style="font-size:12px; color:var(--text-faint); margin-top:4px;">
+                                Every new commitment (uploaded, captured live, or added by hand) is written to the sheet as soon as it's
+                                created, and status changes made in this app update the sheet's Status column. Turn off to sync by hand instead.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="tracker-fields-custom" class="tracker-fields" style="display:none;">
+                        <div>
+                            <label for="tracker-custom-name">App name</label>
+                            <input type="text" id="tracker-custom-name" placeholder="e.g. Linear, Asana, Trello">
+                        </div>
+                        <button type="button" class="btn secondary" id="suggest-tracker-steps-btn" style="justify-self:start;">Suggest setup steps (AI)</button>
+                        <div id="tracker-ai-steps"></div>
+                        <div>
+                            <label for="tracker-custom-endpoint">Endpoint / base URL</label>
+                            <input type="text" id="tracker-custom-endpoint" placeholder="https://api.example.com">
+                        </div>
+                        <div>
+                            <label for="tracker-custom-api-key">API key</label>
+                            <input type="text" id="tracker-custom-api-key" placeholder="API key or token">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label><input type="checkbox" id="tracker-enabled" checked style="width:auto; margin-right:6px;">Enabled</label>
+                    </div>
+                    <button type="submit" class="btn" style="justify-self:start;">Save tracker</button>
+                </form>
+            </div>
+
+            <div class="saved-settings">
+                <div class="section-title">Current tracker</div>
+                <div id="tracker-summary"></div>
+            </div>
+
+            <div class="webhook-box">
+                <strong>Two-way sync — every field:</strong> the sheet has the columns ID, Task, Owner, Due date, Status and
+                Owner email (A–F). Any change made here (task, owner, owner email, due date, status) rewrites that row in the
+                sheet; any change made in columns B–F of the sheet flows back here. <strong>The most recent edit wins</strong>:
+                an edit older than the app's last change to that task is ignored and the sheet is put back to the app's
+                version. An owner typed in the sheet without an email is matched from <a href="/people">People</a>, and the
+                email is filled in for you. For changes made in the sheet to reach the app, point it at your
+                <strong>signed</strong> tracker webhook (see <a href="#webhook-security">Webhook security</a> below for the signing secret):
+                <code id="tracker-webhook-url">POST /api/webhooks/tracker-update/…</code>
+                <div style="margin-top:6px;">Body (signed with the X-CT-Timestamp and X-CT-Signature headers; send any of the fields):</div>
+                <code>{ "external_ref": "row-2", "task": "…", "owner": "Kevin Heys", "owner_email": "kevin@x.com", "due_date": "2026-10-31", "status": "Done", "edited_at": 1760500000, "provider": "google_sheets" }</code>
+                <ol style="margin:10px 0 0; padding-left:18px; color:var(--text-muted); line-height:1.6;">
+                    <li><strong>Google Sheets:</strong> in the sheet, Extensions → Apps Script, paste this (put your signing secret in
+                        <code style="display:inline;padding:1px 4px;">SECRET</code>, and your public ngrok address in place of this page's address
+                        if it's localhost), then use the clock icon (Triggers) → Add Trigger → function <code style="display:inline;padding:1px 4px;">onStatusEdit</code>,
+                        event source "From spreadsheet", event type "On edit". A plain <code style="display:inline;padding:1px 4px;">onEdit(e)</code> can't make outbound calls.
+                        <strong>Replace any earlier version of this script</strong> — the pre-0.9.0 one used an unsigned URL (now 410), and
+                        the 0.9.x one only sent the status. The trigger can stay as it is.
+                        <pre id="apps-script" style="background:var(--bg-inset,#0000000d); padding:10px; border-radius:6px; overflow-x:auto; margin-top:6px; font-size:12px;"></pre>
+                    </li>
+                    <li><strong>Jira:</strong> Jira Automation's "Send web request" can't compute an HMAC signature, so route it through a
+                        small relay that signs (e.g. a Google Apps Script web app or a cloud function using the snippet above).
+                        Jira sync from this app is still simulated, so this is only needed once it's made real.</li>
+                </ol>
+                <div style="margin-top:8px; color:var(--text-faint); font-size:12px;">
+                    A commitment gets an <code style="display:inline;padding:1px 4px;">external_ref</code> the first time you sync it to the tracker — use the "Simulate update from tracker" button on a commitment to try this without setting up a real automation.
+                </div>
+            </div>
+
+            <h2 class="page-heading" style="margin-top:44px;">Transcript source</h2>
+            <div class="mock-notice">
+                "Check now" is still simulated. Fathom is real: its webhook pushes a transcript straight into
+                this app the moment a meeting ends, and it's parsed and extracted automatically — see the webhook
+                box below. Zoom / Google Meet / Teams / Otter here stay simulated (see readme for why). Whatever
+                you pick here, you can always upload a transcript
+                manually from the dashboard.
+            </div>
+
+            <div class="card">
+                <div class="section-title">Where should transcripts come from?</div>
+                <div class="warn-banner" id="transcript-unreadable" style="display:none;"></div>
+                <form class="settings-form" id="transcript-form">
+                    <div>
+                        <label for="transcript-provider">Provider</label>
+                        <select id="transcript-provider">
+                            <option value="none">None — I'll upload transcripts manually</option>
+                            <option value="zoom">Zoom</option>
+                            <option value="google_meet">Google Meet</option>
+                            <option value="teams">Microsoft Teams</option>
+                            <option value="otter">Otter.ai</option>
+                            <option value="fathom">Fathom</option>
+                            <option value="custom">Custom app…</option>
+                        </select>
+                    </div>
+
+                    <div id="transcript-fields-zoom" class="tracker-fields" style="display:none;">
+                        <details class="help-steps">
+                            <summary>How to get your Zoom details</summary>
+                            <ol>
+                                <li>Go to the <a href="https://marketplace.zoom.us" target="_blank" rel="noopener">Zoom App Marketplace</a> and sign in with the Zoom account whose meetings you want captured.</li>
+                                <li>Under "Develop", build a <strong>Server-to-Server OAuth</strong> app. Copy its Account ID, Client ID, and Client Secret into the fields below.</li>
+                                <li>Grant it the <code style="display:inline;padding:1px 4px;">cloud_recording:read</code> scope so it can read meeting transcripts.</li>
+                                <li>Add an event subscription for <code style="display:inline;padding:1px 4px;">recording.transcript_completed</code>, set a Secret Token for it (paste that below too), and — once you've saved this form — point its Event notification endpoint URL at the webhook URL shown further down this page.</li>
+                            </ol>
+                        </details>
+                        <div>
+                            <label for="zoom-account-id">Account ID</label>
+                            <input type="text" id="zoom-account-id" placeholder="Zoom account ID">
+                        </div>
+                        <div>
+                            <label for="zoom-client-id">Client ID</label>
+                            <input type="text" id="zoom-client-id" placeholder="Server-to-Server OAuth app client ID">
+                        </div>
+                        <div>
+                            <label for="zoom-client-secret">Client secret</label>
+                            <input type="text" id="zoom-client-secret" placeholder="Server-to-Server OAuth app client secret">
+                        </div>
+                        <div>
+                            <label for="zoom-webhook-secret">Webhook secret token</label>
+                            <input type="text" id="zoom-webhook-secret" placeholder="From the app's event subscription">
+                        </div>
+                    </div>
+
+                    <div id="transcript-fields-google_meet" class="tracker-fields" style="display:none;">
+                        <details class="help-steps">
+                            <summary>How to get your Google Meet details</summary>
+                            <ol>
+                                <li>Meet transcripts save to Google Drive/Docs after a recorded meeting.</li>
+                                <li>In the <a href="https://console.cloud.google.com" target="_blank" rel="noopener">Google Cloud console</a>, enable the Drive API for a project.</li>
+                                <li>Create an API key or service account with access to your Workspace transcripts.</li>
+                                <li>Enter your Workspace account email and that API key below.</li>
+                            </ol>
+                        </details>
+                        <div>
+                            <label for="meet-email">Workspace account email</label>
+                            <input type="email" id="meet-email" placeholder="you@company.com">
+                        </div>
+                        <div>
+                            <label for="meet-key">API key</label>
+                            <input type="text" id="meet-key" placeholder="Google API key">
+                        </div>
+                    </div>
+
+                    <div id="transcript-fields-teams" class="tracker-fields" style="display:none;">
+                        <details class="help-steps">
+                            <summary>How to get your Teams details</summary>
+                            <ol>
+                                <li>In the <a href="https://portal.azure.com" target="_blank" rel="noopener">Azure portal</a>, register an app under Azure Active Directory.</li>
+                                <li>Grant it the <code style="display:inline;padding:1px 4px;">OnlineMeetingTranscript.Read.All</code> Graph API permission (needs admin consent).</li>
+                                <li>Copy your Tenant ID from the Azure AD overview page.</li>
+                                <li>Generate a client secret to use as the API key below.</li>
+                            </ol>
+                        </details>
+                        <div>
+                            <label for="teams-tenant">Tenant ID</label>
+                            <input type="text" id="teams-tenant" placeholder="Azure AD tenant ID">
+                        </div>
+                        <div>
+                            <label for="teams-key">API key</label>
+                            <input type="text" id="teams-key" placeholder="Client secret">
+                        </div>
+                    </div>
+
+                    <div id="transcript-fields-otter" class="tracker-fields" style="display:none;">
+                        <details class="help-steps">
+                            <summary>How to get your Otter.ai details</summary>
+                            <ol>
+                                <li>Log in to <a href="https://otter.ai" target="_blank" rel="noopener">otter.ai</a> and go to Settings → Integrations.</li>
+                                <li>Generate an API key for your account (available on eligible plans).</li>
+                                <li>Enter your Otter account email and that API key below.</li>
+                            </ol>
+                        </details>
+                        <div>
+                            <label for="otter-email">Account email</label>
+                            <input type="email" id="otter-email" placeholder="you@company.com">
+                        </div>
+                        <div>
+                            <label for="otter-key">API key</label>
+                            <input type="text" id="otter-key" placeholder="Otter API key">
+                        </div>
+                    </div>
+
+                    <div id="transcript-fields-fathom" class="tracker-fields" style="display:none;">
+                        <details class="help-steps">
+                            <summary>How to get your Fathom webhook secret</summary>
+                            <ol>
+                                <li>Sign up free at <a href="https://fathom.video" target="_blank" rel="noopener">fathom.video</a> and connect your calendar so its bot joins your Zoom meetings automatically.</li>
+                                <li>Go to Settings → API Access and generate an API key.</li>
+                                <li>Save this form first — it generates the webhook URL shown further down this page.</li>
+                                <li>Back in Fathom, add a webhook pointed at that URL. Enable "include transcript", and pick a trigger such as "my recordings".</li>
+                                <li>Fathom shows a webhook secret (starts with <code style="display:inline;padding:1px 4px;">whsec_</code>) when the webhook is created — paste it below.</li>
+                            </ol>
+                        </details>
+                        <div>
+                            <label for="fathom-webhook-secret">Webhook secret</label>
+                            <input type="text" id="fathom-webhook-secret" placeholder="whsec_...">
+                        </div>
+                    </div>
+
+                    <div id="transcript-fields-custom" class="tracker-fields" style="display:none;">
+                        <div>
+                            <label for="transcript-custom-name">App name</label>
+                            <input type="text" id="transcript-custom-name" placeholder="e.g. Fireflies.ai, Fathom">
+                        </div>
+                        <button type="button" class="btn secondary" id="suggest-transcript-steps-btn" style="justify-self:start;">Suggest setup steps (AI)</button>
+                        <div id="transcript-ai-steps"></div>
+                        <div>
+                            <label for="transcript-custom-identifier">Account / workspace identifier</label>
+                            <input type="text" id="transcript-custom-identifier" placeholder="you@company.com or workspace ID">
+                        </div>
+                        <div>
+                            <label for="transcript-custom-api-key">API key</label>
+                            <input type="text" id="transcript-custom-api-key" placeholder="API key or token">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label><input type="checkbox" id="transcript-enabled" checked style="width:auto; margin-right:6px;">Enabled</label>
+                    </div>
+                    <button type="submit" class="btn" style="justify-self:start;">Save transcript source</button>
+                </form>
+            </div>
+
+            <div class="webhook-box">
+                <strong>Live capture:</strong> once a source above is saved and enabled, a real "meeting ended"
+                automation (Zoom's event subscription, or your own script for a Custom app) can push the
+                transcript straight into this app instead of waiting on "check now". Point it at:
+                <code id="capture-webhook-url">POST /api/webhooks/transcript-capture/…</code>
+                <div style="margin-top:6px;">Body (for a generic/Custom push — signed like every inbound webhook, see Webhook security below):</div>
+                <code id="capture-webhook-body">{ "title": "Weekly Standup", "meeting_date": "2026-09-03", "transcript_excerpt": "..." }</code>
+                <div style="margin-top:8px; display:flex; align-items:center; gap:10px;">
+                    <button type="button" class="btn secondary" id="copy-webhook-url-btn" style="padding:4px 12px; font-size:12.5px;">Copy URL</button>
+                    <button type="button" class="btn secondary" id="regenerate-token-btn" style="padding:4px 12px; font-size:12.5px;">Regenerate token</button>
+                </div>
+                <div style="margin-top:8px; color:var(--text-faint); font-size:12px;">
+                    Honest caveat: this only works once this app is reachable at a public HTTPS URL a real
+                    automation can call — it's <code style="display:inline;padding:1px 4px;">localhost</code>-only
+                    today. Use "Simulate incoming transcript" below to try the flow without one.
+                </div>
+            </div>
+
+            <div class="toolbar" style="margin-top:20px; margin-bottom:0;">
+                <div class="section-title" style="margin-bottom:0;">Current source</div>
+                <div style="display:flex; gap:10px;">
+                    <button class="btn secondary" id="check-transcript-btn">Check for new transcripts</button>
+                    <button class="btn secondary" id="simulate-capture-btn">Simulate incoming transcript</button>
+                </div>
+            </div>
+            <div class="saved-settings" style="margin-top:12px;">
+                <div id="transcript-summary"></div>
+                <div id="transcript-log" style="margin-top:10px;"></div>
+            </div>
+
+            <h2 class="page-heading" style="margin-top:44px;" id="webhook-security">Webhook security</h2>
+            <div class="mock-notice">
+                Anything that pushes data into this app — the Google Sheet script, a transcript automation — must sign each request
+                with your account's <strong>signing secret</strong>. Unsigned, wrongly signed, more than
+                <span id="tolerance-minutes">5</span> minutes old, or repeated (replayed) requests are refused, and each webhook URL
+                accepts at most <span id="rate-limit">60</span> requests a minute. Fathom uses its own signature (the secret saved above)
+                with the same replay checks.
+            </div>
+            <div class="card">
+                <div class="section-title">Signing secret</div>
+                <div class="warn-banner" id="webhook-unreadable" style="display:none;"></div>
+                <div class="secret-box">
+                    <code id="webhook-secret">••••</code>
+                    <button type="button" class="btn secondary chip-btn" id="reveal-secret-btn">Reveal</button>
+                    <button type="button" class="btn secondary chip-btn" id="copy-secret-btn">Copy</button>
+                    <button type="button" class="btn danger-outline chip-btn" id="rotate-secret-btn">Rotate</button>
+                </div>
+                <div style="font-size:12px; color:var(--text-faint); margin-top:8px; line-height:1.5;">
+                    Treat it like a password. Rotating makes a new one and the old one stops working immediately — update your
+                    Apps Script / automation right after.
+                </div>
+
+                <div class="section-title" style="margin-top:20px;">How to sign a request</div>
+                <div style="font-size:13px; color:var(--text-muted); line-height:1.6;">
+                    Send these headers with the JSON body, where <em>signature</em> is the hex HMAC-SHA256 of
+                    <code style="display:inline;padding:1px 4px;">"&lt;timestamp&gt;.&lt;exact body&gt;"</code> keyed with the signing secret:
+                </div>
+                <pre style="background:var(--bg-inset,#0000000d); padding:10px; border-radius:6px; overflow-x:auto; font-size:12px;">X-CT-Timestamp: 1760500000          (unix seconds, now)
+X-CT-Signature: v1=&lt;signature&gt;
+X-CT-Delivery:  &lt;a unique id&gt;      (optional, recommended)</pre>
+                <pre id="python-signing" style="background:var(--bg-inset,#0000000d); padding:10px; border-radius:6px; overflow-x:auto; font-size:12px;"></pre>
+
+                <div class="section-title" style="margin-top:20px;">Your webhook URLs</div>
+                <div id="webhook-urls" style="font-size:13px; line-height:1.7;"></div>
+
+                <div class="section-title" style="margin-top:20px;">Recent deliveries</div>
+                <div class="nudge-history" id="webhook-deliveries"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/app.js"></script>
+<script>
+let savedChannels = [];
+let channelChosen = false;
+// What each loader found, for the "Saved right now" tiles at the top.
+const savedSummary = {};
+const CHANNEL_LABELS = { slack: "Slack", teams: "Microsoft Teams", email: "Email", custom: "Custom" };
+
+function tile(kind, value, detail, state) {
+    const pill = state ? `<span class="pill ${state === "on" ? "ok" : state === "warn" ? "warn" : "off"}">${
+        state === "on" ? "on" : state === "warn" ? "needs attention" : "off"}</span>` : "";
+    return `<div class="config-tile"><div class="config-kind">${escapeHtml(kind)}</div>
+        <div class="config-value">${escapeHtml(value)}${pill}</div>
+        ${detail ? `<div class="config-detail">${escapeHtml(detail)}</div>` : ""}</div>`;
+}
+
+function renderConfigSummary() {
+    const tiles = [];
+    if (savedSummary.channels) {
+        tiles.push(savedSummary.channels.length
+            ? tile("Nudge channels", savedSummary.channels.map(c => c.channel === "custom" ? (c.custom_name || "Custom") : CHANNEL_LABELS[c.channel]).join(", "),
+                savedSummary.channels.map(c => `${CHANNEL_LABELS[c.channel] || c.channel}: ${CADENCE_LABELS[c.cadence]}${c.enabled ? "" : " (disabled)"}`
+                    + (c.channel === "email" ? ` · from ${c.webhook_or_key}${c.config.ai_mode === "extraction_engine" ? " · AI-tailored" : ""}` : "")).join(" · "),
+                savedSummary.channels.some(c => c.unreadable) ? "warn" : "on")
+            : tile("Nudge channels", "None saved", "Add one below", "off"));
+    }
+    if (savedSummary.auto !== undefined) {
+        tiles.push(tile("Automatic nudges", savedSummary.auto ? "Switched on" : "Switched off", "Checked every 15 minutes", savedSummary.auto ? "on" : "off"));
+    }
+    if (savedSummary.tracker) {
+        const t = savedSummary.tracker;
+        tiles.push(t.provider === "none"
+            ? tile("Task tracker", "Built-in only", "No external tracker", "off")
+            : tile("Task tracker", t.provider === "custom" ? (t.custom_name || "Custom") : TRACKER_LABELS[t.provider],
+                t.provider === "google_sheets" ? `Sheet ${t.config.spreadsheet_id || "?"} · ${t.config.auto_sync ? "auto-sync on" : "manual sync"}`
+                    : t.provider === "jira" ? `${t.config.project_key || "?"} @ ${t.config.base_url || "?"}` : (t.config.endpoint || ""),
+                t.unreadable ? "warn" : (t.enabled ? "on" : "off")));
+    }
+    if (savedSummary.transcript) {
+        const s = savedSummary.transcript;
+        tiles.push(s.provider === "none"
+            ? tile("Transcript source", "Manual upload", "No automatic source", "off")
+            : tile("Transcript source", s.provider === "custom" ? (s.custom_name || "Custom") : TRANSCRIPT_LABELS[s.provider],
+                Object.keys(s.secret_hints || {}).length ? `Secret saved (${Object.values(s.secret_hints)[0]})` : "",
+                s.unreadable ? "warn" : (s.enabled ? "on" : "off")));
+    }
+    if (savedSummary.ai !== undefined) {
+        const a = savedSummary.ai;
+        tiles.push(!a ? tile("Extraction engine", "Built-in model", "AI extraction page is turned off", "off")
+            : a.engine === "builtin" ? tile("Extraction engine", "Built-in model", "Free, runs on this machine", "on")
+            : tile("Extraction engine", a.engine === "anthropic" ? "Claude (Anthropic)" : "OpenAI-compatible",
+                [(a.configs[a.engine] || {}).model, (a.configs[a.engine] || {}).has_api_key ? `key ${(a.configs[a.engine] || {}).api_key_hint}` : ""]
+                    .filter(Boolean).join(" · "), a.consent_at ? "on" : "warn"));
+    }
+    if (savedSummary.webhook) {
+        tiles.push(tile("Webhook signing", savedSummary.webhook.unreadable ? "Secret unreadable" : `Secret ${savedSummary.webhook.secret_hint}`,
+            `${savedSummary.webhook.deliveries.filter(d => d.status === "accepted").length} recent accepted deliveries`,
+            savedSummary.webhook.unreadable ? "warn" : "on"));
+    }
+    document.getElementById("config-summary").innerHTML = tiles.join("");
+}
+
+async function loadSettings() {
+    const rows = await api("/api/nudge-settings");
+    savedChannels = rows;
+    savedSummary.channels = rows;
+    renderConfigSummary();
+    // Open the form on a channel that's actually saved (email first), so its
+    // saved details are what you see — not an empty Slack form.
+    if (!channelChosen && rows.length) {
+        const pick = rows.find(r => r.channel === "email") || rows[0];
+        document.getElementById("channel").value = pick.channel;
+    }
+    channelChosen = true;
+    const list = document.getElementById("saved-list");
+    if (rows.length === 0) {
+        list.innerHTML = '<div style="color:var(--text-muted); font-size:14px;">No channels configured yet.</div>';
+    } else {
+        list.innerHTML = rows.map(r => `
+            <div class="saved-settings-item">
+                <div>
+                    <div class="chan">${escapeHtml(r.channel === "custom" ? (r.custom_name || "Custom") : r.channel)}</div>
+                    <div class="cadence">${CADENCE_LABELS[r.cadence]} · ${r.enabled ? "enabled" : "disabled"}
+                        · ${escapeHtml(r.channel === "email" ? `${r.config.smtp_host || "?"} as ${r.webhook_or_key}` : r.webhook_or_key)}</div>
+                </div>
+                <div style="display:flex; gap:6px;">
+                    <button class="btn secondary" style="padding:3px 10px; font-size:12px;" data-test="${r.channel}">Send test</button>
+                    <button class="btn secondary" style="padding:3px 10px; font-size:12px;" data-delete="${r.channel}">Remove</button>
+                </div>
+            </div>
+        `).join("");
+    }
+    showChannelHelp(document.getElementById("channel").value);
+}
+
+async function loadNudgeAutomation() {
+    const prefs = await api("/api/nudge-preferences");
+    document.getElementById("auto-nudges").checked = prefs.auto_enabled;
+    savedSummary.auto = prefs.auto_enabled;
+    renderConfigSummary();
+    const rows = await api("/api/nudges/log");
+    const statusText = { sent: "sent", failed: "failed", skipped: "skipped", mock_sent: "mock, not sent" };
+    document.getElementById("nudge-activity").innerHTML = rows.length === 0
+        ? '<div class="nudge-history-empty">No nudges yet.</div>'
+        : rows.map(n => `
+            <div class="nudge-history-item">${formatDateTime(n.triggered_at)} — ${escapeHtml(n.channel)} · ${statusText[n.status] || escapeHtml(n.status)}
+                · ${escapeHtml(n.task_text)} (${escapeHtml(n.owner_name)})
+                ${n.detail ? `<div style="font-size:12px; color:var(--text-faint);">${escapeHtml(n.detail)}</div>` : ""}</div>
+        `).join("");
+}
+
+const TRACKER_LABELS = { none: "None", jira: "Jira", google_sheets: "Google Sheets", custom: "Custom" };
+const TRANSCRIPT_LABELS = { none: "None", zoom: "Zoom", google_meet: "Google Meet", teams: "Microsoft Teams", otter: "Otter.ai", fathom: "Fathom", custom: "Custom" };
+
+// ---------- AI-suggested setup steps (custom apps only) ----------
+
+function renderAiSteps(container, result) {
+    if (!result.steps || result.steps.length === 0) {
+        container.innerHTML = '<div style="color:var(--text-muted); font-size:13px;">No steps suggested.</div>';
+        return;
+    }
+    container.innerHTML = `
+        <div class="ai-steps-box">
+            <ol>${result.steps.map(s => `<li>${escapeHtml(s)}</li>`).join("")}</ol>
+            <div class="ai-disclaimer">${escapeHtml(result.disclaimer)}</div>
+        </div>
+    `;
+}
+
+function wireSuggestButton(buttonId, appNameInputId, containerId, category) {
+    const btn = document.getElementById(buttonId);
+    btn.addEventListener("click", async () => {
+        const appName = document.getElementById(appNameInputId).value.trim();
+        const container = document.getElementById(containerId);
+        if (!appName) {
+            toast("Enter an app name first");
+            return;
+        }
+        btn.disabled = true;
+        btn.textContent = "Asking AI…";
+        try {
+            const result = await api("/api/setup-steps/suggest", { method: "POST", body: { app_name: appName, category } });
+            renderAiSteps(container, result);
+        } catch (err) {
+            toast(err.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = "Suggest setup steps (AI)";
+        }
+    });
+}
+
+function showTrackerFields(provider) {
+    document.querySelectorAll("#tracker-form .tracker-fields").forEach(el => { el.style.display = "none"; });
+    const el = document.getElementById(`tracker-fields-${provider}`);
+    if (el) el.style.display = "grid";
+}
+
+const WEBHOOK_FIELD = {
+    slack: { label: "Bot token or webhook URL", placeholder: "xoxb-... or https://hooks.slack.com/services/..." },
+    teams: { label: "Workflows webhook URL", placeholder: "https://....logic.azure.com/workflows/..." },
+    custom: { label: "URL to POST reminders to", placeholder: "https://example.com/hooks/nudge" },
+};
+
+function showChannelHelp(channel) {
+    document.querySelectorAll(".channel-help").forEach(el => { el.style.display = "none"; });
+    const el = document.getElementById(`channel-help-${channel}`);
+    if (el) el.style.display = "block";
+    document.getElementById("channel-custom-block").style.display = channel === "custom" ? "block" : "none";
+    document.getElementById("email-fields").style.display = channel === "email" ? "block" : "none";
+    document.getElementById("webhook-block").style.display = channel === "email" ? "none" : "block";
+
+    const saved = savedChannels.find(s => s.channel === channel);
+    const banner = document.getElementById("channel-saved-banner");
+    banner.style.color = saved && saved.unreadable ? "var(--danger)" : "";
+    banner.textContent = !saved ? "Not saved yet — fill in and save to add this channel."
+        : saved.unreadable ? `Saved, but its credentials can't be read: ${saved.unreadable}`
+        : `✓ Saved — showing your saved ${CHANNEL_LABELS[channel] || channel} settings (${saved.enabled ? "enabled" : "disabled"}).`;
+    if (channel === "email") {
+        const cfg = (saved && saved.config) || {};
+        document.getElementById("smtp-host").value = cfg.smtp_host || "";
+        document.getElementById("smtp-port").value = cfg.smtp_port || "";
+        document.getElementById("smtp-security").value = cfg.smtp_security || "starttls";
+        document.getElementById("smtp-user").value = cfg.username || "";
+        document.getElementById("smtp-from").value = cfg.from_email || "";
+        document.getElementById("smtp-pass").value = "";
+        document.getElementById("smtp-pass").placeholder = saved && saved.has_password ? "Saved — leave blank to keep" : "";
+        document.getElementById("draft-subject").value = cfg.draft_subject || "";
+        document.getElementById("draft-body").value = cfg.draft_body || "";
+        document.getElementById("sender-name").value = cfg.sender_name || "";
+        document.getElementById("ai-tailor").checked = cfg.ai_mode === "extraction_engine";
+    } else {
+        const f = WEBHOOK_FIELD[channel];
+        document.getElementById("webhook-label").textContent = f.label;
+        document.getElementById("webhook").placeholder = f.placeholder;
+        document.getElementById("webhook").value = "";
+        document.getElementById("webhook-hint").textContent = saved ? `Saved (${saved.webhook_or_key}) — leave blank to keep it.` : "";
+    }
+    if (saved) {
+        document.getElementById("cadence").value = saved.cadence;
+        document.getElementById("enabled").checked = !!saved.enabled;
+    }
+}
+
+function showTranscriptFields(provider) {
+    document.querySelectorAll("#transcript-form .tracker-fields").forEach(el => { el.style.display = "none"; });
+    const el = document.getElementById(`transcript-fields-${provider}`);
+    if (el) el.style.display = "grid";
+}
+
+// Saved credentials never come back from the server — only a masked hint.
+// The field stays empty; saving it blank keeps the stored value.
+function fillSecretField(inputId, field, settings) {
+    const el = document.getElementById(inputId);
+    if (el.dataset.origPlaceholder === undefined) el.dataset.origPlaceholder = el.placeholder || "";
+    el.value = "";
+    const hint = (settings.secret_hints || {})[field];
+    el.placeholder = hint ? `Saved (${hint}) — leave blank to keep` : el.dataset.origPlaceholder;
+}
+
+function showUnreadable(id, message) {
+    const el = document.getElementById(id);
+    el.style.display = message ? "block" : "none";
+    el.textContent = message ? `Saved, but the credentials can't be read — ${message}` : "";
+}
+
+async function loadTrackerSettings() {
+    const t = await api("/api/tracker-settings");
+    savedSummary.tracker = t;
+    renderConfigSummary();
+    showUnreadable("tracker-unreadable", t.unreadable);
+    document.getElementById("tracker-provider").value = t.provider;
+    document.getElementById("tracker-enabled").checked = t.enabled;
+    showTrackerFields(t.provider);
+
+    if (t.provider === "jira") {
+        document.getElementById("jira-base-url").value = t.config.base_url || "";
+        document.getElementById("jira-project-key").value = t.config.project_key || "";
+        document.getElementById("jira-email").value = t.config.email || "";
+        fillSecretField("jira-api-token", "api_token", t);
+    } else if (t.provider === "google_sheets") {
+        document.getElementById("sheets-id").value = t.config.spreadsheet_id || "";
+        document.getElementById("sheets-auto-sync").checked = !!t.config.auto_sync;
+    } else if (t.provider === "custom") {
+        document.getElementById("tracker-custom-name").value = t.custom_name || "";
+        document.getElementById("tracker-custom-endpoint").value = t.config.endpoint || "";
+        fillSecretField("tracker-custom-api-key", "api_key", t);
+    }
+
+    const summary = document.getElementById("tracker-summary");
+    if (t.provider === "none") {
+        summary.innerHTML = '<div style="color:var(--text-muted); font-size:14px;">No tracker connected — commitments are tracked in this app only.</div>';
+    } else {
+        const label = t.provider === "custom" ? (t.custom_name || "Custom") : TRACKER_LABELS[t.provider];
+        const detail = t.provider === "jira"
+            ? `${t.config.project_key || "?"} @ ${t.config.base_url || "?"}`
+            : t.provider === "custom"
+            ? `${t.config.endpoint || "?"}`
+            : `Spreadsheet ${t.config.spreadsheet_id || "?"} · ${t.config.auto_sync ? "auto-sync on" : "manual sync"}`;
+        summary.innerHTML = `
+            <div class="saved-settings-item">
+                <div>
+                    <div class="chan">${escapeHtml(label)}</div>
+                    <div class="cadence">${escapeHtml(detail)} · ${t.enabled ? "enabled" : "disabled"}</div>
+                </div>
+            </div>
+        `;
+    }
+}
+
+let currentWebhookToken = null;
+
+function renderCaptureWebhookUrl() {
+    const provider = document.getElementById("transcript-provider").value;
+    const path = provider === "fathom" ? "/api/webhooks/fathom/" : "/api/webhooks/transcript-capture/";
+    const url = `${window.location.origin}${path}${currentWebhookToken}`;
+    document.getElementById("capture-webhook-url").textContent = `POST ${url}`;
+    document.getElementById("capture-webhook-body").textContent = provider === "fathom"
+        ? "Set this as the destination URL when creating the webhook in Fathom (with include_transcript enabled) — Fathom sends its own payload shape, signed with the webhook secret you saved above."
+        : '{ "title": "Weekly Standup", "meeting_date": "2026-09-03", "transcript_excerpt": "..." }';
+    return url;
+}
+
+async function loadTranscriptSettings() {
+    const t = await api("/api/transcript-source-settings");
+    savedSummary.transcript = t;
+    renderConfigSummary();
+    showUnreadable("transcript-unreadable", t.unreadable);
+    document.getElementById("transcript-provider").value = t.provider;
+    document.getElementById("transcript-enabled").checked = t.enabled;
+    showTranscriptFields(t.provider);
+    currentWebhookToken = t.webhook_token;
+    renderCaptureWebhookUrl();
+
+    if (t.provider === "zoom") {
+        document.getElementById("zoom-account-id").value = t.config.account_id || "";
+        document.getElementById("zoom-client-id").value = t.config.client_id || "";
+        fillSecretField("zoom-client-secret", "client_secret", t);
+        fillSecretField("zoom-webhook-secret", "webhook_secret_token", t);
+    } else if (t.provider === "google_meet") {
+        document.getElementById("meet-email").value = t.config.workspace_email || "";
+        fillSecretField("meet-key", "api_key", t);
+    } else if (t.provider === "teams") {
+        document.getElementById("teams-tenant").value = t.config.tenant_id || "";
+        fillSecretField("teams-key", "api_key", t);
+    } else if (t.provider === "otter") {
+        document.getElementById("otter-email").value = t.config.account_email || "";
+        fillSecretField("otter-key", "api_key", t);
+    } else if (t.provider === "fathom") {
+        fillSecretField("fathom-webhook-secret", "webhook_secret", t);
+    } else if (t.provider === "custom") {
+        document.getElementById("transcript-custom-name").value = t.custom_name || "";
+        document.getElementById("transcript-custom-identifier").value = t.config.account_identifier || "";
+        fillSecretField("transcript-custom-api-key", "api_key", t);
+    }
+
+    const summary = document.getElementById("transcript-summary");
+    if (t.provider === "none") {
+        summary.innerHTML = '<div style="color:var(--text-muted); font-size:14px;">No transcript source connected — upload transcripts by hand from the dashboard.</div>';
+    } else {
+        const label = t.provider === "custom" ? (t.custom_name || "Custom") : TRANSCRIPT_LABELS[t.provider];
+        const account = t.config.account_id || t.config.account_email || t.config.workspace_email || t.config.tenant_id
+            || t.config.account_identifier || (t.provider === "fathom" ? "webhook connected" : "?");
+        summary.innerHTML = `
+            <div class="saved-settings-item">
+                <div>
+                    <div class="chan">${escapeHtml(label)}</div>
+                    <div class="cadence">${escapeHtml(account)} · ${t.enabled ? "enabled" : "disabled"}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    await loadTranscriptLog();
+}
+
+async function loadTranscriptLog() {
+    const rows = await api("/api/transcript-source/log");
+    const logEl = document.getElementById("transcript-log");
+    if (rows.length === 0) {
+        logEl.innerHTML = "";
+        return;
+    }
+    logEl.innerHTML = `<div class="cadence" style="margin-bottom:6px;">Recent activity</div>` + rows.map(r => `
+        <div class="nudge-history-item">
+            ${r.direction === "inbound" ? "↓ pushed to us" : "↑ we checked"} · ${formatDateTime(r.triggered_at)} — ${escapeHtml(r.detail)}
+            ${r.meeting_title ? `<span class="badge status-in_progress" style="margin-left:6px;">→ ${escapeHtml(r.meeting_title)}</span>` : ""}
+        </div>
+    `).join("");
+}
+
+// ---------- webhook security ----------
+
+function appsScript(url) {
+    return `var SECRET = "PASTE_YOUR_SIGNING_SECRET";   // Integrations → Webhook security → Reveal
+var APP_URL = "${url}";
+// Columns written by the app: A ID, B Task, C Owner, D Due date, E Status, F Owner email.
+
+function onStatusEdit(e) {   // installable "On edit" trigger (the name is kept from earlier versions)
+  if (!e || !e.range) return;
+  var range = e.range;
+  if (range.getLastColumn() < 2 || range.getColumn() > 6) return;   // only B..F matter
+  for (var r = Math.max(range.getRow(), 2); r <= range.getLastRow(); r++) {   // row 1 is the header
+    sendRow(range.getSheet(), r);
+  }
+}
+
+function sendRow(sheet, row) {
+  if (!sheet.getRange(row, 1).getValue()) return;   // not a row the app wrote (no ID in column A)
+  var v = sheet.getRange(row, 2, 1, 5).getValues()[0];   // B..F
+  var due = v[2] instanceof Date
+    ? Utilities.formatDate(v[2], Session.getScriptTimeZone(), "yyyy-MM-dd")
+    : String(v[2]).trim();
+  var ts = Math.floor(Date.now() / 1000).toString();
+  var body = JSON.stringify({
+    external_ref: "row-" + row,
+    task: String(v[0]), owner: String(v[1]), due_date: due, status: String(v[3]), owner_email: String(v[4]).trim(),
+    edited_at: Number(ts), provider: "google_sheets",
+  });
+  var mac = Utilities.computeHmacSha256Signature(ts + "." + body, SECRET, Utilities.Charset.UTF_8);
+  var hex = mac.map(function (b) { return ("0" + (b & 0xff).toString(16)).slice(-2); }).join("");
+  var response = UrlFetchApp.fetch(APP_URL, {
+    method: "post",
+    contentType: "application/json",
+    payload: body,
+    muteHttpExceptions: true,
+    headers: {
+      "X-CT-Timestamp": ts,
+      "X-CT-Signature": "v1=" + hex,
+      "X-CT-Delivery": Utilities.getUuid(),
+      "ngrok-skip-browser-warning": "true",
+    },
+  });
+  Logger.log(row + ": " + response.getResponseCode() + " " + response.getContentText());
+}
+
+// Run by hand from the editor to test the connection (row 2 = first data row).
+function testStatusEdit() {
+  sendRow(SpreadsheetApp.getActiveSheet(), 2);
+}`;
+}
+
+function pythonSigning(url) {
+    return `# Python example — sends a transcript to your capture webhook
+import hashlib, hmac, json, time, uuid, urllib.request
+SECRET = "PASTE_YOUR_SIGNING_SECRET"
+body = json.dumps({"title": "Weekly Standup", "meeting_date": "2026-10-15", "transcript_excerpt": "Priya: I'll send it by Friday."})
+ts = str(int(time.time()))
+sig = hmac.new(SECRET.encode(), f"{ts}.{body}".encode(), hashlib.sha256).hexdigest()
+req = urllib.request.Request("${url}", data=body.encode(), method="POST", headers={
+    "Content-Type": "application/json", "X-CT-Timestamp": ts, "X-CT-Signature": "v1=" + sig, "X-CT-Delivery": str(uuid.uuid4())})
+print(urllib.request.urlopen(req).read().decode())`;
+}
+
+let revealedSecret = null;
+
+async function loadWebhookSecurity() {
+    const w = await api("/api/webhook-security");
+    savedSummary.webhook = w;
+    renderConfigSummary();
+    const origin = window.location.origin;
+    document.getElementById("tolerance-minutes").textContent = Math.round(w.tolerance_seconds / 60);
+    document.getElementById("rate-limit").textContent = w.rate_limit_per_minute;
+    document.getElementById("webhook-secret").textContent = revealedSecret || w.secret_hint || "••••";
+    const warn = document.getElementById("webhook-unreadable");
+    warn.style.display = w.unreadable ? "block" : "none";
+    warn.textContent = w.unreadable ? `${w.unreadable} — press Rotate to create a new signing secret.` : "";
+    document.getElementById("tracker-webhook-url").textContent = `POST ${origin}${w.paths.tracker}`;
+    document.getElementById("apps-script").textContent = appsScript(origin + w.paths.tracker);
+    document.getElementById("python-signing").textContent = pythonSigning(origin + w.paths.transcript);
+    document.getElementById("webhook-urls").innerHTML = [
+        ["Task tracker status updates", w.paths.tracker],
+        ["Transcript capture (generic / Custom)", w.paths.transcript],
+        ["Fathom (signed by Fathom)", w.paths.fathom],
+    ].map(([label, path]) => `<div><strong>${escapeHtml(label)}:</strong> <code style="display:inline;padding:1px 4px;">${escapeHtml(origin + path)}</code></div>`).join("")
+        + (w.legacy_tracker_webhook_enabled
+            ? '<div class="warn-banner" style="margin-top:8px;">The old unsigned tracker URL is still switched on (CT_ALLOW_UNSIGNED_TRACKER_WEBHOOK=1). Turn it off once your script is updated.</div>'
+            : "");
+    const names = { tracker: "tracker", transcript: "transcript capture", fathom: "Fathom" };
+    document.getElementById("webhook-deliveries").innerHTML = w.deliveries.length === 0
+        ? '<div class="nudge-history-empty">Nothing received yet.</div>'
+        : w.deliveries.map(d => `<div class="nudge-history-item">${formatDateTime(d.received_at)} — ${escapeHtml(names[d.endpoint] || d.endpoint)} ·
+            <span class="job-status ${d.status === "accepted" ? "succeeded" : "failed"}">${escapeHtml(d.status)}</span>
+            ${d.detail ? `<div style="font-size:12px; color:var(--text-faint);">${escapeHtml(d.detail)}</div>` : ""}</div>`).join("");
+}
+
+// ---------- email draft ----------
+
+async function loadEmailDraftHelpers() {
+    const d = await api("/api/email-draft/defaults");
+    document.getElementById("draft-subject").placeholder = d.subject;
+    document.getElementById("draft-body").placeholder = d.body;
+    document.getElementById("placeholder-list").innerHTML = Object.entries(d.placeholders).map(([key, help]) =>
+        `<button type="button" data-ph="${key}" title="${escapeHtml(help)}">{${key}}</button>`).join("");
+    try {
+        const { people } = await api("/api/people");
+        document.getElementById("preview-person").innerHTML = '<option value="">Sample person</option>' + people.map(p =>
+            `<option value="${escapeHtml(p.designation || "")}">${escapeHtml(`${p.first_name} ${p.last_name}`.trim() || p.email)}${p.designation ? " — " + escapeHtml(p.designation) : " (no designation)"}</option>`).join("");
+    } catch (e) { /* optional */ }
+    let engineNote = "";
+    try {
+        const ai = await api("/api/ai-extraction/settings");
+        savedSummary.ai = ai;
+        engineNote = ai.engine === "builtin" ? "Right now no AI engine is saved there, so drafts go out as written."
+            : !ai.consent_at ? "The AI engine there hasn't been confirmed, so drafts go out as written."
+            : `Engine in use: ${ai.engine === "anthropic" ? "Claude" : "OpenAI-compatible"}${(ai.configs[ai.engine] || {}).model ? " · " + ai.configs[ai.engine].model : ""}.`;
+    } catch (e) {
+        savedSummary.ai = null;
+        engineNote = "The AI extraction feature is turned off, so drafts go out as written.";
+    }
+    document.getElementById("ai-engine-status").textContent = engineNote;
+    renderConfigSummary();
+}
+
+function emailDraftConfig() {
+    return {
+        draft_subject: document.getElementById("draft-subject").value.trim(),
+        draft_body: document.getElementById("draft-body").value.trim(),
+        sender_name: document.getElementById("sender-name").value.trim(),
+        ai_mode: document.getElementById("ai-tailor").checked ? "extraction_engine" : "off",
+    };
+}
+
+async function loadEverything() {
+    // Each section loads on its own, so one failing call can't leave the rest of the page blank.
+    const results = await Promise.allSettled([loadSettings(), loadNudgeAutomation(), loadTrackerSettings(),
+        loadTranscriptSettings(), loadWebhookSecurity(), loadEmailDraftHelpers()]);
+    const failed = results.filter(r => r.status === "rejected");
+    if (failed.length) toast(`Some settings couldn't be loaded: ${failed[0].reason.message}`);
+}
+
+async function init() {
+    initThemeToggle();
+    await requireIdentified();
+    await initNav();
+    await loadEverything();
+    reloadOnReturn(loadEverything);
+
+    // Keep the activity logs current while this page is open: nudges sent by
+    // the scheduler, transcripts arriving by webhook.
+    connectLiveEvents((kind) => {
+        if (kind === "nudge_sent" || kind === "reconnected") loadNudgeAutomation();
+        if (kind === "meeting_created" || kind === "reconnected") { loadTranscriptLog(); loadWebhookSecurity(); }
+    }, { pollMs: 0 });
+
+    document.getElementById("placeholder-list").addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-ph]");
+        if (!btn) return;
+        const body = document.getElementById("draft-body");
+        if (!body.value) body.value = body.placeholder;
+        const at = body.selectionStart ?? body.value.length;
+        body.value = body.value.slice(0, at) + `{${btn.dataset.ph}}` + body.value.slice(body.selectionEnd ?? at);
+        body.focus();
+    });
+
+    document.getElementById("preview-email-btn").addEventListener("click", async (e) => {
+        const btn = e.currentTarget, out = document.getElementById("email-preview");
+        const designation = document.getElementById("preview-designation").value.trim() || document.getElementById("preview-person").value;
+        btn.disabled = true;
+        out.innerHTML = '<div class="email-preview">Writing the preview…</div>';
+        try {
+            const r = await api("/api/email-draft/preview", { method: "POST", body: { config: emailDraftConfig(), designation } });
+            out.innerHTML = `<div class="email-preview"><div class="preview-subject">${escapeHtml(r.subject)}</div>${escapeHtml(r.body)}
+                <div class="preview-meta">${r.ai_used ? `AI-tailored by ${escapeHtml(r.model || "the AI engine")} for "${escapeHtml(r.designation || "unknown designation")}"${r.tone ? ` — ${escapeHtml(r.tone)}` : ""}`
+                    : escapeHtml(r.note || "Your draft as written (AI tailoring is off)")}. Nothing was sent.</div></div>`;
+        } catch (err) {
+            out.innerHTML = `<div class="warn-banner">${escapeHtml(err.message)}</div>`;
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    document.getElementById("reveal-secret-btn").addEventListener("click", async () => {
+        try {
+            revealedSecret = (await api("/api/webhook-security/reveal", { method: "POST" })).secret;
+            document.getElementById("webhook-secret").textContent = revealedSecret;
+        } catch (err) { toast(err.message); }
+    });
+    document.getElementById("copy-secret-btn").addEventListener("click", async () => {
+        try {
+            const secret = revealedSecret || (await api("/api/webhook-security/reveal", { method: "POST" })).secret;
+            await navigator.clipboard.writeText(secret);
+            toast("Signing secret copied");
+        } catch (err) { toast("Couldn't copy — press Reveal and copy it by hand"); }
+    });
+    document.getElementById("rotate-secret-btn").addEventListener("click", async () => {
+        if (!confirm("Create a new signing secret? Anything signed with the current one stops working immediately.")) return;
+        try {
+            revealedSecret = (await api("/api/webhook-security/rotate", { method: "POST" })).secret;
+            toast("New signing secret created — update your scripts now");
+            await loadWebhookSecurity();
+        } catch (err) { toast(err.message); }
+    });
+
+    document.getElementById("gmail-preset-btn").addEventListener("click", () => {
+        document.getElementById("smtp-host").value = "smtp.gmail.com";
+        document.getElementById("smtp-port").value = "587";
+        document.getElementById("smtp-security").value = "starttls";
+        toast("Gmail settings filled in — add your Gmail address and app password");
+    });
+
+    document.getElementById("saved-list").addEventListener("click", async (e) => {
+        const testBtn = e.target.closest("button[data-test]");
+        const delBtn = e.target.closest("button[data-delete]");
+        try {
+            if (testBtn) {
+                testBtn.disabled = true;
+                const r = await api(`/api/nudge-settings/${testBtn.dataset.test}/test`, { method: "POST" });
+                toast(`Test sent — ${r.detail}`);
+            } else if (delBtn) {
+                if (!confirm(`Remove the ${delBtn.dataset.delete} channel?`)) return;
+                await api(`/api/nudge-settings/${delBtn.dataset.delete}`, { method: "DELETE" });
+                toast("Channel removed");
+                await loadSettings();
+            }
+        } catch (err) {
+            toast(err.message);
+        } finally {
+            if (testBtn) testBtn.disabled = false;
+        }
+    });
+
+    document.getElementById("auto-nudges").addEventListener("change", async (e) => {
+        try {
+            const r = await api("/api/nudge-preferences", { method: "POST", body: { auto_enabled: e.target.checked } });
+            toast(r.auto_enabled ? "Automatic nudges on" : "Automatic nudges off");
+        } catch (err) {
+            toast(err.message);
+            e.target.checked = !e.target.checked;
+        }
+    });
+
+    document.getElementById("run-nudges-btn").addEventListener("click", async (e) => {
+        const btn = e.currentTarget, out = document.getElementById("run-nudges-result");
+        btn.disabled = true;
+        out.textContent = "Checking…";
+        try {
+            const r = await api("/api/nudges/run-now", { method: "POST" });
+            const count = s => r.results.filter(x => x.status === s).length;
+            out.textContent = r.results.length === 0
+                ? "Nothing is due right now."
+                : `${count("sent")} sent, ${count("skipped")} skipped, ${count("failed")} failed — see Recent nudges.`;
+            await loadNudgeAutomation();
+        } catch (err) {
+            out.textContent = err.message;
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    document.getElementById("channel").addEventListener("change", (e) => {
+        showChannelHelp(e.target.value);
+    });
+
+    wireSuggestButton("suggest-channel-steps-btn", "custom-channel-name", "channel-ai-steps", "nudge");
+    wireSuggestButton("suggest-tracker-steps-btn", "tracker-custom-name", "tracker-ai-steps", "tracker");
+    wireSuggestButton("suggest-transcript-steps-btn", "transcript-custom-name", "transcript-ai-steps", "transcript");
+
+    document.getElementById("settings-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const channel = document.getElementById("channel").value;
+        const custom_name = document.getElementById("custom-channel-name").value.trim();
+        const webhook_or_key = document.getElementById("webhook").value.trim();
+        const cadence = document.getElementById("cadence").value;
+        const enabled = document.getElementById("enabled").checked;
+        if (channel === "custom" && !custom_name) {
+            toast("Enter an app name for the custom channel");
+            return;
+        }
+        const config = channel !== "email" ? {} : {
+            smtp_host: document.getElementById("smtp-host").value.trim(),
+            smtp_port: document.getElementById("smtp-port").value.trim(),
+            smtp_security: document.getElementById("smtp-security").value,
+            username: document.getElementById("smtp-user").value.trim(),
+            password: document.getElementById("smtp-pass").value,
+            from_email: document.getElementById("smtp-from").value.trim(),
+            ...emailDraftConfig(),
+        };
+        try {
+            await api("/api/nudge-settings", { method: "POST", body: { channel, custom_name, webhook_or_key, cadence, enabled, config } });
+            toast("Channel saved — use Send test to check it");
+            await loadSettings();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    document.getElementById("tracker-provider").addEventListener("change", (e) => {
+        showTrackerFields(e.target.value);
+    });
+
+    document.getElementById("tracker-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const provider = document.getElementById("tracker-provider").value;
+        let config = {};
+        let custom_name = "";
+        if (provider === "jira") {
+            config = {
+                base_url: document.getElementById("jira-base-url").value.trim(),
+                project_key: document.getElementById("jira-project-key").value.trim(),
+                email: document.getElementById("jira-email").value.trim(),
+                api_token: document.getElementById("jira-api-token").value.trim(),
+            };
+        } else if (provider === "google_sheets") {
+            config = {
+                spreadsheet_id: document.getElementById("sheets-id").value.trim(),
+                auto_sync: document.getElementById("sheets-auto-sync").checked,
+            };
+        } else if (provider === "custom") {
+            custom_name = document.getElementById("tracker-custom-name").value.trim();
+            config = {
+                endpoint: document.getElementById("tracker-custom-endpoint").value.trim(),
+                api_key: document.getElementById("tracker-custom-api-key").value.trim(),
+            };
+            if (!custom_name) {
+                toast("Enter an app name for the custom tracker");
+                return;
+            }
+        }
+        const enabled = document.getElementById("tracker-enabled").checked;
+        try {
+            await api("/api/tracker-settings", { method: "POST", body: { provider, custom_name, config, enabled } });
+            toast("Tracker saved");
+            await loadTrackerSettings();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    document.getElementById("transcript-provider").addEventListener("change", (e) => {
+        showTranscriptFields(e.target.value);
+        renderCaptureWebhookUrl();
+    });
+
+    document.getElementById("transcript-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const provider = document.getElementById("transcript-provider").value;
+        let config = {};
+        let custom_name = "";
+        if (provider === "zoom") {
+            config = {
+                account_id: document.getElementById("zoom-account-id").value.trim(),
+                client_id: document.getElementById("zoom-client-id").value.trim(),
+                client_secret: document.getElementById("zoom-client-secret").value.trim(),
+                webhook_secret_token: document.getElementById("zoom-webhook-secret").value.trim(),
+            };
+        } else if (provider === "google_meet") {
+            config = {
+                workspace_email: document.getElementById("meet-email").value.trim(),
+                api_key: document.getElementById("meet-key").value.trim(),
+            };
+        } else if (provider === "teams") {
+            config = {
+                tenant_id: document.getElementById("teams-tenant").value.trim(),
+                api_key: document.getElementById("teams-key").value.trim(),
+            };
+        } else if (provider === "otter") {
+            config = {
+                account_email: document.getElementById("otter-email").value.trim(),
+                api_key: document.getElementById("otter-key").value.trim(),
+            };
+        } else if (provider === "fathom") {
+            config = {
+                webhook_secret: document.getElementById("fathom-webhook-secret").value.trim(),
+            };
+        } else if (provider === "custom") {
+            custom_name = document.getElementById("transcript-custom-name").value.trim();
+            config = {
+                account_identifier: document.getElementById("transcript-custom-identifier").value.trim(),
+                api_key: document.getElementById("transcript-custom-api-key").value.trim(),
+            };
+            if (!custom_name) {
+                toast("Enter an app name for the custom transcript source");
+                return;
+            }
+        }
+        const enabled = document.getElementById("transcript-enabled").checked;
+        try {
+            await api("/api/transcript-source-settings", { method: "POST", body: { provider, custom_name, config, enabled } });
+            toast("Transcript source saved");
+            await loadTranscriptSettings();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    document.getElementById("check-transcript-btn").addEventListener("click", async () => {
+        try {
+            await api("/api/transcript-source/check-now", { method: "POST" });
+            toast("Checked (mock — nothing was actually fetched)");
+            await loadTranscriptLog();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    document.getElementById("simulate-capture-btn").addEventListener("click", async () => {
+        try {
+            await api("/api/meetings/simulate-incoming-capture", { method: "POST" });
+            toast("Simulated an incoming live transcript — check the dashboard");
+            await loadTranscriptLog();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+
+    document.getElementById("copy-webhook-url-btn").addEventListener("click", async () => {
+        const url = renderCaptureWebhookUrl();
+        try {
+            await navigator.clipboard.writeText(url);
+            toast("Webhook URL copied");
+        } catch (err) {
+            toast("Couldn't copy — select the URL above manually");
+        }
+    });
+
+    document.getElementById("regenerate-token-btn").addEventListener("click", async () => {
+        try {
+            const result = await api("/api/transcript-source/regenerate-token", { method: "POST" });
+            currentWebhookToken = result.webhook_token;
+            renderCaptureWebhookUrl();
+            toast("Webhook token regenerated — update any automation pointed at the old URL");
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+}
+
+init();
+</script>
+</body>
+</html>

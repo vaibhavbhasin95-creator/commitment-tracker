@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Background Jobs — Commitment Tracker</title>
+<script>
+(function () {
+    try {
+        var t = localStorage.getItem("ct-theme");
+        if (!t) t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="/style.css">
+<style>
+    .people-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    .people-table th, .people-table td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border, #8883); vertical-align: middle; }
+    .people-table input { width: 100%; padding: 5px 7px; font-size: 13px; }
+    .people-actions { white-space: nowrap; }
+    .people-actions button { padding: 3px 9px; font-size: 12px; }
+    .owner-stats { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--text-muted); margin-top: 6px; }
+    .owner-stats strong { color: var(--text); }
+    @media (max-width: 700px) { .people-table .col-user { display: none; } }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+    <aside class="sidebar">
+        <div class="sidebar-brand"><span class="logo-dot"></span>Commitment Tracker</div>
+        <nav class="sidebar-nav">
+            <a href="/dashboard" class="sidebar-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"></rect><rect x="14" y="3" width="7" height="5" rx="1.5"></rect><rect x="14" y="12" width="7" height="9" rx="1.5"></rect><rect x="3" y="16" width="7" height="5" rx="1.5"></rect></svg>
+                Dashboard
+            </a>
+            <a href="/people" class="sidebar-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                People
+            </a>
+            <a href="/settings" class="sidebar-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                Integrations
+            </a>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="avatar" id="nav-avatar"></div>
+            <div class="sidebar-footer-email" id="nav-email"></div>
+            <button class="icon-btn" id="logout-btn" title="Log out" aria-label="Log out">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+            </button>
+        </div>
+    </aside>
+
+    <div class="main">
+        <div class="topbar">
+            <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg></button>
+        </div>
+
+        <div class="content" style="max-width: 980px;">
+            <h2 class="page-heading">Background jobs</h2>
+            <div class="mock-notice">
+                Slow or failure-prone work runs here instead of making you wait: extracting commitments after an upload or a
+                webhook, retrying a Google Sheets sync that failed, and the automatic reminder check. A job that fails for a
+                temporary reason is retried automatically with a growing delay (30 s, 1 min, 2 min…); one that can't succeed
+                (e.g. the model isn't trained) fails straight away with the reason. Jobs survive an app restart.
+            </div>
+            <div class="status-stats" id="job-counts" style="margin:4px 0 18px;"></div>
+            <div class="table-card" style="overflow-x:auto;">
+                <table>
+                    <thead><tr><th>Job</th><th>Status</th><th>Attempts</th><th>Created</th><th>Finished</th><th></th></tr></thead>
+                    <tbody id="jobs-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/app.js"></script>
+<script>
+const STATUS_TEXT = { queued: "Queued", running: "Running", succeeded: "Done", failed: "Failed", cancelled: "Cancelled" };
+
+function describe(job) {
+    const r = job.result || {};
+    const parts = [];
+    if (job.payload && job.payload.meeting_id) parts.push(`meeting #${job.payload.meeting_id}`);
+    if (r.commitments_extracted != null) parts.push(`${r.commitments_extracted} commitment(s) extracted${r.extraction_engine ? " by " + r.extraction_engine : ""}`);
+    if (r.synced_to_tracker) parts.push(`${r.synced_to_tracker} written to the sheet`);
+    if (r.tracker_sync_error) parts.push(`sheet sync failed: ${r.tracker_sync_error} (retry queued)`);
+    if (r.sent != null) parts.push(`${r.sent} sent, ${r.skipped} skipped, ${r.failed} failed`);
+    return parts.join(" · ");
+}
+
+async function load() {
+    const data = await api("/api/jobs");
+    const n = s => data.counts[s] || 0;
+    document.getElementById("job-counts").innerHTML = [["queued", "Waiting"], ["running", "Running"], ["succeeded", "Done"], ["failed", "Failed"]]
+        .map(([s, label]) => `<div class="stat-tile"><span class="job-status ${s}">${n(s)}</span><div class="stat-label">${label}</div></div>`).join("")
+        + (data.inline ? '<div class="stat-label">Jobs run inline (CT_JOBS_INLINE=1)</div>' : "");
+    const body = document.getElementById("jobs-body");
+    body.innerHTML = data.jobs.length === 0
+        ? '<tr><td colspan="6" style="color:var(--text-muted);">No background jobs yet — upload a transcript to start one.</td></tr>'
+        : data.jobs.map(j => `<tr>
+            <td><strong>${escapeHtml(j.label)}</strong>
+                ${describe(j) ? `<div class="job-detail">${escapeHtml(describe(j))}</div>` : ""}
+                ${j.last_error ? `<div class="job-detail" style="color:var(--danger);">${escapeHtml(j.last_error)}</div>` : ""}</td>
+            <td><span class="job-status ${j.status}">${STATUS_TEXT[j.status] || escapeHtml(j.status)}</span>
+                ${j.status === "queued" && j.attempts > 0 ? `<div class="job-detail">next try ${formatDateTime(j.run_after)}</div>` : ""}</td>
+            <td>${j.attempts} / ${j.max_attempts}</td>
+            <td>${formatDateTime(j.created_at)}</td>
+            <td>${j.finished_at ? formatDateTime(j.finished_at) : "—"}</td>
+            <td style="white-space:nowrap;">
+                ${j.status === "failed" || j.status === "cancelled" ? `<button class="btn secondary chip-btn" data-retry="${j.id}">Retry</button>` : ""}
+                ${j.status === "queued" ? `<button class="btn secondary chip-btn" data-cancel="${j.id}">Cancel</button>` : ""}
+            </td></tr>`).join("");
+}
+
+async function init() {
+    initThemeToggle();
+    await requireIdentified();
+    await initNav();
+    await load();
+    reloadOnReturn(load);
+    connectLiveEvents(() => load(), { pollMs: 5000 });
+    document.getElementById("jobs-body").addEventListener("click", async (e) => {
+        const retry = e.target.closest("[data-retry]"), cancel = e.target.closest("[data-cancel]");
+        if (!retry && !cancel) return;
+        const id = retry ? retry.dataset.retry : cancel.dataset.cancel;
+        try {
+            await api(`/api/jobs/${id}/${retry ? "retry" : "cancel"}`, { method: "POST" });
+            toast(retry ? "Queued again" : "Cancelled");
+            await load();
+        } catch (err) {
+            toast(err.message);
+        }
+    });
+}
+
+init();
+</script>
+</body>
+</html>
