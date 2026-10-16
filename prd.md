@@ -91,7 +91,7 @@ Legend for the tables below — **Verified live:** exercised against the real ex
 
 ## Source control
 
-- 0.8.0–0.10.0 are committed on branch `release/v0.10.0` (not pushed yet). Credentials and keys are git-ignored; the FY2027 transcripts (real meeting content) were taken out of tracking in that commit — they remain in earlier, already-pushed commits.
+- 0.8.0–0.10.3 are committed on branch `release/v0.10.0` (not pushed yet). Credentials and keys are git-ignored; the FY2027 transcripts (real meeting content) were taken out of tracking in that commit — they remain in earlier, already-pushed commits.
 - **Layout (0.9.0):** all code is in `src/` — the app modules, `static/`, `schema.sql`, `tests/`, `ml/` training scripts and `docs_tools/`. Runtime data stays in the project root: the database, `secret.key`, `flask_secret.key`, Google credentials, `auth_config.json`, and the models in `ml/`.
 - Excluded from git on purpose: the local database, `secret.key`, `flask_secret.key`, `auth_config.json`, Google credentials (`client_secret_*.json`, `google_token.json`), embedding cache, `_snapshots/`.
 - Not excluded and needing a decision before any commit: training CSVs (~21 MB), the team's transcript folder (~7 MB), FY2027 transcript files (real meeting content), the original Colab script.

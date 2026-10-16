@@ -12,7 +12,26 @@ All notable changes to Commitment Tracker are recorded here, newest first.
 - Every change gets an entry here in the same session it is made, and `APP_VERSION` is bumped to match.
 - Sections per version: **Added** (new features), **Changed** (changes to existing behavior), **Fixed** (bug fixes), **Security**, **Known issues**.
 - **Revertible features:** a feature built "on trial" gets a snapshot of every file it modifies under `_snapshots/<previous version>/`, plus a revert script and instructions in its changelog entry (first used for 0.5.0).
-- **Git status:** only 0.1.0 is committed to git (commits `b92fcc9`–`1ad95f9`). Everything from 0.2.0 onward exists as uncommitted local changes — no commits or tags have been made for them yet.
+- **Git status:** everything up to 0.10.3 is committed on branch `release/v0.10.0` (0.8.0–0.10.0 in `48f9054`, 0.10.1–0.10.2 in `7702575`, then 0.10.3). That branch is not pushed or merged to `main` yet; `origin/main` has up to 0.7.3.
+
+---
+
+## [0.10.3] — 2026-10-16 — QA handover pack
+
+### Added
+- **QA Test Guide** for the QA team, who haven't seen the app before: `docs/QA_Test_Guide.md`, built to `docs/Commitment_Tracker_QA_Test_Guide_v0.10.3.pdf`. It covers:
+  - what's in and out of scope;
+  - how testers reach the developer's running app over ngrok, with no install;
+  - per-area setup;
+  - a sample transcript with the built-in model's actual output;
+  - about 50 test cases with expected results;
+  - a bug-report template;
+  - host steps and a private-install appendix.
+- `src/docs_tools/build_qa_guide_pdf.py` builds that PDF. The Edge print step in `build_prd_pdf.py` moved into a shared `print_to_pdf()`, so both PDFs build the same way.
+
+### Changed
+- The git-status notes here and in the PRD were out of date. They now reflect the commits on `release/v0.10.0`.
+- No app code changes apart from `APP_VERSION`. Tests: 289 checks, all passing.
 
 ---
 
