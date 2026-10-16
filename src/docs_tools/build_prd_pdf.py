@@ -66,26 +66,12 @@ def app_version():
     return match.group(1) if match else "unknown"
 
 
-def main():
+def print_to_pdf(html, page, out):
+    """Writes html to page, prints it to out with headless Edge, removes page.
+    Shared with build_qa_guide_pdf.py."""
     edge = next((p for p in EDGE_CANDIDATES if p.exists()), None)
     if edge is None:
-        sys.exit("Microsoft Edge not found — install it or open docs/_prd_print.html in a browser and print to PDF.")
-
-    version = app_version()
-    text = (ROOT / "prd.md").read_text(encoding="utf-8")
-    text = re.sub(r"~~(.+?)~~", r"<del>\1</del>", text)  # python-markdown has no ~~strikethrough~~
-    body = markdown.markdown(text, extensions=["tables", "fenced_code", "sane_lists"])
-    # "Current status" heading + diagram + caption -> their own landscape page
-    body = re.sub(r"(<h2>Current status</h2>.*?<img [^>]*status-diagram[^>]*>.*?<p><em>.*?</em></p>)",
-                  r'<section class="landscape">\1</section>', body, count=1, flags=re.S)
-    note = f'<p class="cover-note">PDF generated {date.today():%d %B %Y} from prd.md · app version {version}</p>'
-    body = body.replace("</h1>", "</h1>" + note, 1)
-    html = (f'<!doctype html><html><head><meta charset="utf-8">'
-            f'<base href="{ROOT.as_uri()}/"><title>Commitment Tracker — PRD v{version}</title>'
-            f'<style>{CSS}</style></head><body>{body}</body></html>')
-
-    page = ROOT / "docs" / "_prd_print.html"
-    out = ROOT / "docs" / f"Commitment_Tracker_PRD_v{version}.pdf"
+        sys.exit(f"Microsoft Edge not found — install it or open {page.name} in a browser and print to PDF.")
     page.write_text(html, encoding="utf-8")
     out.unlink(missing_ok=True)
     # A separate profile stops Edge from silently handing the job to an Edge
@@ -104,9 +90,26 @@ def main():
             last_size = size
             time.sleep(1.5)
     if not out.exists():
-        sys.exit("Edge didn't produce the PDF — open docs/_prd_print.html in a browser and print to PDF instead.")
+        sys.exit(f"Edge didn't produce the PDF — open {page} in a browser and print to PDF instead.")
     page.unlink()
     print(f"wrote {out} ({out.stat().st_size // 1024} KB)")
+
+
+def main():
+    version = app_version()
+    text = (ROOT / "prd.md").read_text(encoding="utf-8")
+    text = re.sub(r"~~(.+?)~~", r"<del>\1</del>", text)  # python-markdown has no ~~strikethrough~~
+    body = markdown.markdown(text, extensions=["tables", "fenced_code", "sane_lists"])
+    # "Current status" heading + diagram + caption -> their own landscape page
+    body = re.sub(r"(<h2>Current status</h2>.*?<img [^>]*status-diagram[^>]*>.*?<p><em>.*?</em></p>)",
+                  r'<section class="landscape">\1</section>', body, count=1, flags=re.S)
+    note = f'<p class="cover-note">PDF generated {date.today():%d %B %Y} from prd.md · app version {version}</p>'
+    body = body.replace("</h1>", "</h1>" + note, 1)
+    html = (f'<!doctype html><html><head><meta charset="utf-8">'
+            f'<base href="{ROOT.as_uri()}/"><title>Commitment Tracker — PRD v{version}</title>'
+            f'<style>{CSS}</style></head><body>{body}</body></html>')
+
+    print_to_pdf(html, ROOT / "docs" / "_prd_print.html", ROOT / "docs" / f"Commitment_Tracker_PRD_v{version}.pdf")
 
 
 if __name__ == "__main__":
