@@ -12,7 +12,7 @@ All notable changes to Commitment Tracker are recorded here, newest first.
 - Every change gets an entry here in the same session it is made, and `APP_VERSION` is bumped to match.
 - Sections per version: **Added** (new features), **Changed** (changes to existing behavior), **Fixed** (bug fixes), **Security**, **Known issues**.
 - **Revertible features:** a feature built "on trial" gets a snapshot of every file it modifies under `_snapshots/<previous version>/`, plus a revert script and instructions in its changelog entry (first used for 0.5.0).
-- **Git status:** everything up to 0.10.3 is committed on branch `release/v0.10.0` (0.8.0–0.10.0 in `48f9054`, 0.10.1–0.10.2 in `7702575`, then 0.10.3). That branch is not pushed or merged to `main` yet; `origin/main` has up to 0.7.3.
+- **Git status:** everything up to 0.10.3 is committed and pushed to `main` on GitHub, which is the only branch (0.8.0–0.10.0 in `48f9054`, 0.10.1–0.10.2 in `7702575`, 0.10.3 in `2719e00` + `724ca34`).
 
 ---
 
