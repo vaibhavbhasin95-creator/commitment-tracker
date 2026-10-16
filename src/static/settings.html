@@ -912,7 +912,8 @@ async function loadTranscriptLog() {
 function appsScript(url) {
     return `var SECRET = "PASTE_YOUR_SIGNING_SECRET";   // Integrations → Webhook security → Reveal
 var APP_URL = "${url}";
-// Columns written by the app: A ID, B Task, C Owner, D Due date, E Status, F Owner email.
+// Columns written by the app: A ID (1, 2, 3...), B Task, C Owner, D Due date, E Status, F Owner email.
+// Don't change column A — it's how the app finds the row, even after rows are deleted or sorted.
 
 function onStatusEdit(e) {   // installable "On edit" trigger (the name is kept from earlier versions)
   if (!e || !e.range) return;
@@ -924,14 +925,15 @@ function onStatusEdit(e) {   // installable "On edit" trigger (the name is kept 
 }
 
 function sendRow(sheet, row) {
-  if (!sheet.getRange(row, 1).getValue()) return;   // not a row the app wrote (no ID in column A)
+  var id = String(sheet.getRange(row, 1).getValue()).trim();   // column A: the app's number for this row
+  if (!id) return;   // not a row the app wrote
   var v = sheet.getRange(row, 2, 1, 5).getValues()[0];   // B..F
   var due = v[2] instanceof Date
     ? Utilities.formatDate(v[2], Session.getScriptTimeZone(), "yyyy-MM-dd")
     : String(v[2]).trim();
   var ts = Math.floor(Date.now() / 1000).toString();
   var body = JSON.stringify({
-    external_ref: "row-" + row,
+    external_ref: "sheet-" + id, row_ref: "row-" + row,
     task: String(v[0]), owner: String(v[1]), due_date: due, status: String(v[3]), owner_email: String(v[4]).trim(),
     edited_at: Number(ts), provider: "google_sheets",
   });
