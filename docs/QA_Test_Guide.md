@@ -43,13 +43,13 @@ These parts are **simulated or not built yet**:
 
 ## 2. How you get access — no setup needed
 
-**You do not need to install anything or repeat the developer's setup.** The developer runs the app on their machine and shares it over a secure public link (ngrok). You will receive, with this guide:
+**You do not need to install anything or repeat the developer's setup.** The developer runs the app on their machine and shares it over a secure public link (ngrok):
 
-| You will receive | Used for |
-|---|---|
-| **Test URL**, e.g. `https://<name>.ngrok-free.app` | Opening the app |
-| **Host Google account** (an email address) | Sharing your test Google Sheet with the app (section 4.3) |
-| **Test window** (dates / times the server is on) | The app is only reachable while the host's machine is running |
+| Item | Value | Used for |
+|---|---|---|
+| **Test URL** | `https://drowsily-posture-unmoving.ngrok-free.dev` | Opening the app |
+| **Host Google account** | `vaibhavbhasin95@gmail.com` | Sharing your test Google Sheet with the app (section 4.3) |
+| **Test window** | Sent by the developer with this guide | The app is only reachable while the host's machine is running |
 
 Rules for the shared server:
 
@@ -97,9 +97,9 @@ Arjun,Mehta,you+arjun@gmail.com,amehta,Intern
 ### 4.2 Email nudges (needs a Gmail account with 2-Step Verification)
 
 1. Create a Gmail **app password** at `myaccount.google.com/apppasswords` (name it "Commitment Tracker"). Copy the 16-character code.
-2. In the app: **Integrations → Nudges**, channel **Email**, click **Use Gmail settings** (fills `smtp.gmail.com`, port 587).
-3. User name and From: your Gmail address. Password: the **app password**, not your normal password.
-4. Cadence: **1 day before due**. **Save channel**, then click **Test** — a sample reminder should arrive.
+2. In the app: **Integrations → Nudges**, channel **Email**. SMTP server `smtp.gmail.com`, port `587`, security STARTTLS.
+3. User name and Send from: your Gmail address. Password / app password: the **app password**, not your normal password.
+4. Cadence: **1 day before due**. **Save channel**, then click **Send test** — a sample reminder should arrive.
 
 ### 4.3 Google Sheet (two-way sync)
 
@@ -151,7 +151,7 @@ Status values in the app: **Pending**, **In progress**, **Done**. "Expected" is 
 | A2 | Create an account with a valid password | Signed in, Dashboard shown |
 | A3 | Sign out, sign in with a wrong password | Generic error; does not reveal whether the email exists |
 | A4 | Enter a wrong password 5 times | Account locked for 15 minutes, even with the right password |
-| A5 | Signed out, open `<Test URL>/dashboard` directly | Redirected to sign-in |
+| A5 | Signed out, open `https://drowsily-posture-unmoving.ngrok-free.dev/dashboard` directly | Redirected to sign-in |
 | A6 | Account → change password; sign in again with the new password | Works; other open sessions are signed out |
 | A7 | Sign in on two browsers; Account → **Sign out everywhere** | Both sessions end |
 | A8 | Two testers create accounts; each loads data | Neither sees the other's meetings or tasks |
@@ -210,11 +210,11 @@ Status values in the app: **Pending**, **In progress**, **Done**. "Expected" is 
 
 | ID | Steps | Expected |
 |---|---|---|
-| F1 | Integrations → **Test** on the email channel | Sample email arrives |
+| F1 | Integrations → **Send test** on the email channel | Sample email arrives |
 | F2 | On a task with an owner email, **Send test nudge** | Email arrives at the owner's address |
 | F3 | Task due tomorrow; switch on **Automatic nudges** | One reminder arrives (the server checks every 15 min, or sooner if the host shortened the interval); no repeat on the next check |
 | F4 | Mark the task Done before the next check | No further reminders for it |
-| F5 | Enter a wrong app password, then **Test** | Clear SMTP error in **Nudge activity**; no crash |
+| F5 | Enter a wrong app password, then **Send test** | Clear SMTP error in **Recent nudges**; no crash |
 | F6 | Edit the email draft on Integrations; **Preview** | Placeholders (`{owner_first_name}`, `{task}`, `{due_date}`) filled in |
 | F7 | (With 4.4) turn on AI tailoring; preview for the VP and for the Intern | Wording differs by designation; facts and dates unchanged |
 
@@ -251,7 +251,7 @@ Run before each test window, from `C:\PersonalDevelopment\commitment-tracker` wi
 
 ```
 $env:CT_COOKIE_SECURE = "1"
-$env:CT_PUBLIC_URL = "https://<your-static-domain>.ngrok-free.app"
+$env:CT_PUBLIC_URL = "https://drowsily-posture-unmoving.ngrok-free.dev"
 $env:NUDGE_CHECK_INTERVAL_SECONDS = "60"     # optional: faster automatic-nudge checks for F3
 python src\app.py
 ```
@@ -259,11 +259,11 @@ python src\app.py
 In a second terminal:
 
 ```
-ngrok http --url=<your-static-domain>.ngrok-free.app 5000
+ngrok http --url=drowsily-posture-unmoving.ngrok-free.dev 5000
 ```
 
 - Keep both running for the whole window. Don't use `CT_DEBUG=1` on a public link.
-- Send the testers the Test URL, the Google account that owns `google_token.json` (they share their sheets with it), and the window.
+- Send the testers the test window. The Test URL and the Google account that owns `google_token.json` are already in section 2.
 - If Sheet sync fails with `invalid_grant`, the Google token has expired (7 days in "Testing" mode): run `python src\google_oauth_setup.py` again.
 - Your own account's Google Sheet auto-sync and nudge channels are untouched: settings are per account.
 - Optionally, after testing, set `CT_ALLOW_SIGNUP=0` to stop new accounts.
