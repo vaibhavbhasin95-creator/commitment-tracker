@@ -936,6 +936,7 @@ async function init() {
             const result = await api("/api/tracker/sync-all", { method: "POST" });
             toast(result.synced > 0
                 ? `Wrote ${result.synced} commitment${result.synced === 1 ? "" : "s"} to your Google Sheet`
+                    + (result.readded ? ` (${result.readded} whose rows had been deleted from the sheet)` : "")
                 : "Everything is already in your Google Sheet");
             await loadAll();
         } catch (err) {

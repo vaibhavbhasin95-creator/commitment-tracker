@@ -133,7 +133,7 @@ except ImportError:
 
 # Single source of truth for the app version — bump it together with a new
 # CHANGELOG.md entry (see "How versioning works" there).
-APP_VERSION = "0.10.0"
+APP_VERSION = "0.10.2"
 
 # Code lives in src/ (this folder); runtime data — the database, secret.key,
 # Google tokens, ML models — stays in the project root one level up.
@@ -1982,12 +1982,17 @@ def sync_tracker(commitment_id):
             return jsonify({"error": "Google Sheets integration isn't installed — see requirements.txt"}), 503
         try:
             if external_ref:
-                google_sheets.update_row(config.get("spreadsheet_id"), external_ref, dict(row))
-                detail = f"Updated {external_ref} (all fields) in Google Sheet {config.get('spreadsheet_id')}"
-            else:
+                try:
+                    google_sheets.update_row(config.get("spreadsheet_id"), external_ref, dict(row))
+                    detail = f"Updated {external_ref} (all fields) in Google Sheet {config.get('spreadsheet_id')}"
+                except google_sheets.RowMissingError:
+                    external_ref = None   # its row was deleted from the sheet: add it again below
+            if not external_ref:
                 external_ref = google_sheets.append_commitment_row(config.get("spreadsheet_id"), dict(row))
                 db.execute("UPDATE commitments SET external_ref = ? WHERE id = ?", (external_ref, commitment_id))
                 detail = f"Wrote {external_ref} to Google Sheet {config.get('spreadsheet_id')}"
+                if row["external_ref"]:
+                    detail += f" (its earlier row {row['external_ref']} was no longer in the sheet)"
         except google_sheets.GoogleAuthNotReadyError as e:
             db.close()
             return jsonify({"error": str(e)}), 503
@@ -2100,6 +2105,17 @@ def write_row_to_sheet(db, config, commitment_id, detail):
         return None
     try:
         google_sheets.update_row(config.get("spreadsheet_id"), row["external_ref"], dict(row))
+    except google_sheets.RowMissingError:
+        # The row was deleted (or the sheet cleared). Unlink rather than write
+        # into another task's row; "Sync to tracker" / "Sync all" adds it again.
+        db.execute("UPDATE commitments SET external_ref = NULL WHERE id = ?", (commitment_id,))
+        db.execute(
+            "INSERT INTO tracker_sync_log (commitment_id, provider, direction, triggered_at, status, detail) "
+            "VALUES (?, 'google_sheets', 'outbound', ?, 'skipped', ?)",
+            (commitment_id, now_iso(), f"{row['external_ref']} is no longer in the sheet — unlinked; "
+                                       "use Sync to tracker or Sync all to add it again"),
+        )
+        return None
     except Exception as e:
         return f"Couldn't update the Google Sheet: {e}"
     db.execute(
@@ -2132,7 +2148,11 @@ def sync_all_to_tracker():
     """Pushes every not-yet-synced commitment to the Google Sheet in one call
     — the bulk alternative to clicking "Sync to tracker" per commitment.
     Works whether or not auto-sync is on (it's how you catch up the backlog
-    that existed before auto-sync was enabled)."""
+    that existed before auto-sync was enabled).
+
+    It first checks which already-linked tasks still have a row in the sheet
+    and re-adds those whose row was deleted (0.10.2) — so emptying the sheet
+    and pressing "Sync all" rebuilds it, numbered from 1."""
     email = require_email()
     if not email:
         return jsonify({"error": "not identified"}), 401
@@ -2143,6 +2163,21 @@ def sync_all_to_tracker():
     if not config:
         db.close()
         return jsonify({"error": "bulk sync needs Google Sheets connected as your task tracker (Integrations)"}), 400
+    relinked = 0
+    if google_sheets is not None:
+        linked = db.execute(
+            "SELECT commitments.id, commitments.external_ref FROM commitments JOIN meetings ON meetings.id = commitments.meeting_id "
+            "WHERE meetings.owner_email = ? AND commitments.external_ref IS NOT NULL", (email,)).fetchall()
+        if linked:
+            try:
+                gone = google_sheets.missing_refs(config.get("spreadsheet_id"), [r["external_ref"] for r in linked])
+            except Exception as e:
+                db.close()
+                return jsonify({"error": f"Google Sheets API call failed: {e}"}), 502
+            for r in linked:
+                if r["external_ref"] in gone:
+                    db.execute("UPDATE commitments SET external_ref = NULL WHERE id = ?", (r["id"],))
+                    relinked += 1
     count, error = push_unsynced_to_sheet(db, email, config)
     if error:
         db.close()
@@ -2150,7 +2185,7 @@ def sync_all_to_tracker():
     db.commit()
     db.close()
     notify(email, "commitments_changed", synced=count)
-    return jsonify({"ok": True, "synced": count}), 201
+    return jsonify({"ok": True, "synced": count, "readded": relinked}), 201
 
 
 TRACKER_STATUS_SYNONYMS = {
@@ -2279,11 +2314,16 @@ def _apply_tracker_payload(db, email, data, provider_default="external", sent_at
     provider = data.get("provider") or provider_default
     if not external_ref:
         return None, ({"error": "external_ref is required"}, 400)
-    row = db.execute(
-        "SELECT commitments.* FROM commitments JOIN meetings ON meetings.id = commitments.meeting_id "
-        "WHERE meetings.owner_email = ? AND commitments.external_ref = ?",
-        (email, external_ref),
-    ).fetchone()
+    row = None
+    # The 0.10.2 Apps Script sends "sheet-<number in column A>" plus the row
+    # number as row_ref, so rows synced before 0.10.2 ("row-<n>") still match.
+    for ref in (external_ref, (data.get("row_ref") or "").strip()):
+        if ref and row is None:
+            row = db.execute(
+                "SELECT commitments.* FROM commitments JOIN meetings ON meetings.id = commitments.meeting_id "
+                "WHERE meetings.owner_email = ? AND commitments.external_ref = ?",
+                (email, ref),
+            ).fetchone()
     if row is None:
         return None, ({"error": "no matching commitment for that external_ref"}, 404)
     changes, error = clean_commitment_changes(data, from_tracker=True)

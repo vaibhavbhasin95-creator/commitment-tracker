@@ -8,7 +8,7 @@ embedded in prd.md. Edit STAGES / FOUNDATIONS below when a status changes, then:
 from html import escape
 from pathlib import Path
 
-AS_OF = "v0.10.0 · 15 Oct 2026"
+AS_OF = "v0.10.1 · 15 Oct 2026"
 
 STATUS = {
     #           fill       stroke     label
@@ -27,7 +27,7 @@ STAGES = [
     ]),
     ("2  Extract", [
         ("live", "Built-in ML model", "Live · weak on real meetings"),
-        ("built", "Customer's AI engine", "All paths · Gemini not yet run"),
+        ("live", "Customer's AI engine", "Live · tested end-to-end"),
         ("poc", "Retrained model (0.7.0)", "Candidate · not deployed"),
         ("missing", "Owner / due-date rule fixes", "Not built"),
         ("missing", "Real-meeting training data", "Waiting on transcripts"),
@@ -42,16 +42,16 @@ STAGES = [
         ("live", "Dashboard & status", "Live"),
         ("live", "Per-meeting view, clearing", "Live · new in 0.9.0"),
         ("live", "Google Sheets: app → sheet", "Live · every field"),
-        ("built", "Google Sheets: sheet → app", "Built · every field, newest wins"),
+        ("live", "Google Sheets: sheet → app", "Live · every field, newest wins"),
         ("poc", "Jira / custom tracker", "Simulated (log only)"),
     ]),
     ("5  Nudge", [
-        ("built", "Email (Gmail SMTP)", "Built · first real send pending"),
-        ("built", "AI-tailored email draft", "Built · by designation"),
+        ("live", "Email (Gmail SMTP)", "Live · tested"),
+        ("live", "AI-tailored email draft", "Live · by designation"),
         ("built", "Slack (DM or channel)", "Built · not configured"),
         ("built", "Teams (Workflows)", "Built · needs work account"),
         ("built", "Custom webhook", "Built · not configured"),
-        ("built", "Automatic schedule", "Built · runs as a job"),
+        ("live", "Automatic schedule", "Live · runs as a job"),
     ]),
 ]
 

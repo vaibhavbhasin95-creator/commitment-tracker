@@ -55,8 +55,19 @@ def get_credentials():
 
 # Columns A:F. Owner email was added as column F in 0.10.0 so sheets created
 # earlier keep Status in column E; the header cell F1 is added when missing.
+#
+# Column A ("ID") is the sheet's own sequence number since 0.10.2: 1, 2, 3...
+# starting at 1 in an empty sheet (it used to be the app's internal task id,
+# which kept counting after tasks were deleted). It is also how a row is found
+# again: external_ref is "sheet-<n>" and the row is the one whose column A
+# holds n — so deleting or sorting rows in the sheet can't point an update at
+# the wrong task. Rows synced before 0.10.2 keep "row-<n>" (a row number).
 HEADER_ROW = ["ID", "Task", "Owner", "Due date", "Status", "Owner email"]
 STATUS_LABELS = {"pending": "Pending", "in_progress": "In progress", "done": "Done"}
+
+
+class RowMissingError(LookupError):
+    """The task's row is no longer in the sheet (deleted, or the sheet was cleared)."""
 
 
 def _values_api():
@@ -69,22 +80,58 @@ def status_label(status):
     return STATUS_LABELS.get(status, status)
 
 
-def row_values(c):
-    """The A:F cells for one commitment."""
-    return [c["id"], c["task_text"], c["owner_name"], c.get("due_date") or "", status_label(c["status"]),
+def row_values(c, number=""):
+    """The A:F cells for one commitment; A is its sequence number in the sheet."""
+    return [number, c["task_text"], c["owner_name"], c.get("due_date") or "", status_label(c["status"]),
             c.get("owner_email") or ""]
 
 
-def row_number(external_ref):
-    return int(external_ref.split("-", 1)[1])
+def _column_a(values_api, spreadsheet_id):
+    return values_api.get(spreadsheetId=spreadsheet_id, range="A:A").execute().get("values", [])
+
+
+def _cell(column_a, index):
+    """Column A's value at a 0-based index, as stripped text ("" if empty)."""
+    if index >= len(column_a) or not column_a[index]:
+        return ""
+    return str(column_a[index][0]).strip()
+
+
+def _as_number(text):
+    try:
+        return int(float(text))
+    except (TypeError, ValueError):
+        return None
+
+
+def find_row(column_a, external_ref):
+    """The sheet row (1-based) holding this task, or None if it's gone."""
+    kind, _, value = (external_ref or "").partition("-")
+    if kind == "sheet":
+        for index in range(1, len(column_a)):
+            if _as_number(_cell(column_a, index)) == _as_number(value):
+                return index + 1
+        return None
+    if kind == "row" and value.isdigit():
+        n = int(value)
+        return n if n >= 2 and _cell(column_a, n - 1) else None
+    return None
+
+
+def missing_refs(spreadsheet_id, external_refs):
+    """The subset of external_refs whose rows are no longer in the sheet
+    (one read of column A for all of them)."""
+    column_a = _column_a(_values_api(), spreadsheet_id)
+    return {ref for ref in external_refs if find_row(column_a, ref) is None}
 
 
 def append_commitment_rows(spreadsheet_id, commitments):
-    """Writes one row per commitment (id, task, owner, due date, status,
-    owner email) to columns A:F of the first tab, adding the header row first
-    if the sheet is empty (or just the new "Owner email" header to a sheet
-    made before 0.10.0). Returns one external_ref ("row-<n>") per commitment,
-    in order — the reverse (Sheet -> App) flow keys off the edited row number.
+    """Writes one row per commitment to columns A:F of the first tab below
+    the last used row, adding the header row first if the sheet is empty (or
+    just the "Owner email" header to a sheet made before 0.10.0). Column A
+    gets the next sequence number: 1 in an empty sheet, else one more than
+    the highest number already there. Returns one external_ref
+    ("sheet-<number>") per commitment, in order.
 
     Deliberately not values.append: append guesses where the "table" is, and
     an empty cell (e.g. a commitment with no due date) splits that guess, so
@@ -94,7 +141,9 @@ def append_commitment_rows(spreadsheet_id, commitments):
         return []
     values_api = _values_api()
 
-    column_a = values_api.get(spreadsheetId=spreadsheet_id, range="A:A").execute().get("values", [])
+    column_a = _column_a(values_api, spreadsheet_id)
+    while column_a and not _cell(column_a, len(column_a) - 1):
+        column_a.pop()        # trailing blank cells (cleared rows) don't count
     if not column_a:
         values_api.update(
             spreadsheetId=spreadsheet_id, range="A1:F1",
@@ -106,14 +155,17 @@ def append_commitment_rows(spreadsheet_id, commitments):
             spreadsheetId=spreadsheet_id, range="F1",
             valueInputOption="RAW", body={"values": [[HEADER_ROW[5]]]},
         ).execute()
+    used = [n for n in (_as_number(_cell(column_a, i)) for i in range(1, len(column_a))) if n is not None]
+    first_number = max(used) + 1 if used else 1
     first_row = len(column_a) + 1
     last_row = first_row + len(commitments) - 1
 
     values_api.update(
         spreadsheetId=spreadsheet_id, range=f"A{first_row}:F{last_row}",
-        valueInputOption="RAW", body={"values": [row_values(c) for c in commitments]},
+        valueInputOption="RAW",
+        body={"values": [row_values(c, first_number + i) for i, c in enumerate(commitments)]},
     ).execute()
-    return [f"row-{first_row + i}" for i in range(len(commitments))]
+    return [f"sheet-{first_number + i}" for i in range(len(commitments))]
 
 
 def append_commitment_row(spreadsheet_id, commitment):
@@ -123,18 +175,15 @@ def append_commitment_row(spreadsheet_id, commitment):
 def update_row(spreadsheet_id, external_ref, commitment):
     """Rewrites every editable cell (B:F — task, owner, due date, status,
     owner email) of an already-synced row, so the sheet matches the app after
-    any change made here. An edit made through the API doesn't fire the
-    sheet's On edit trigger, so this can't bounce back as an inbound update."""
-    n = row_number(external_ref)
-    _values_api().update(
+    any change made here. Raises RowMissingError if the row is no longer in
+    the sheet, rather than writing into whatever row is there now. An edit
+    made through the API doesn't fire the sheet's On edit trigger, so this
+    can't bounce back as an inbound update."""
+    values_api = _values_api()
+    n = find_row(_column_a(values_api, spreadsheet_id), external_ref)
+    if n is None:
+        raise RowMissingError(f"{external_ref} is no longer in the sheet")
+    values_api.update(
         spreadsheetId=spreadsheet_id, range=f"B{n}:F{n}",
         valueInputOption="RAW", body={"values": [row_values(commitment)[1:]]},
-    ).execute()
-
-
-def update_status(spreadsheet_id, external_ref, status):
-    """Overwrites only the status cell (column E) of an already-synced row."""
-    _values_api().update(
-        spreadsheetId=spreadsheet_id, range=f"E{row_number(external_ref)}",
-        valueInputOption="RAW", body={"values": [[status_label(status)]]},
     ).execute()

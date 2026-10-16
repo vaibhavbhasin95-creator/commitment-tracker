@@ -16,6 +16,44 @@ All notable changes to Commitment Tracker are recorded here, newest first.
 
 ---
 
+## [0.10.2] — 2026-10-15 — Sheet numbers start at 1; rows are found by number, not position
+
+### Found while investigating "dates from the sheet don't update"
+- **Cause:** the app on port 5000 had been started at 14:12, before the 0.10.0 sync code was saved (15:18). The database has no `updated_at` column, and the webhook log uses 0.9.x wording.
+- **Effect:** sheet edits were still handled by the 0.9.x code, which reads only the status. That's why dates (and task, owner, email) never changed.
+- **Fix:** restart the app. 0.10.0's full-field sync then applies, with no code change needed.
+
+### Fixed
+- **Column A ("ID") is now the sheet's own sequence number**, starting at **1** in an empty sheet. It used to be the app's internal task id, which kept counting after tasks were deleted (203, 204…). New rows get one more than the highest number already in the sheet; blank rows at the bottom don't count.
+- **Rows are found by that number, not by their position.**
+  - Tasks are linked as `sheet-<number>`.
+  - Before, the link was the row number (`row-<n>`). Deleting, inserting or sorting rows in the sheet shifted the rows, so an update could land on another task's row, or write into an emptied sheet.
+  - Now an update finds the row whose column A holds the task's number.
+  - If that row is gone, the task is **unlinked** and nothing is written. The sync history says so, and "Sync to tracker" adds it back as a new row.
+- **Sync all to sheet first re-adds tasks whose rows were deleted.** Emptying the sheet and pressing **Sync all** rebuilds it, numbered from 1. The response and the toast report how many were re-added.
+- **Apps Script on the Integrations page:** it sends the column-A number (`external_ref: "sheet-<n>"`) plus the row number (`row_ref`). Rows synced before 0.10.2 still match through `row_ref`.
+- Tests: **289 checks**, all passing. New checks cover numbering from 1, deleted rows, a cleared sheet, rebuilding with Sync all, and matching old rows.
+
+### Action needed
+1. **Restart the app** with the project's Python.
+2. **Paste the new Apps Script** from Integrations → Task tracker into the sheet. The trigger can stay.
+3. **Optional:** to renumber the current rows (203…) from 1, delete all rows in the sheet, header included, and press **Sync all to sheet** on the dashboard.
+
+---
+
+## [0.10.1] — 2026-10-15 — Status update: five integrations confirmed live
+
+### Changed
+- The team tested these end-to-end on the real services, so they move from "built" (blue) to **live** (green) in the PRD and the status diagram:
+  - customer's AI extraction engine;
+  - Google Sheets, sheet → app (every field, through the 0.10.0 Apps Script);
+  - email nudges;
+  - AI-tailored email drafts;
+  - automatic nudge schedule.
+- **Totals are now 18 live, 7 built, 3 proof of concept, 5 not built.** Still built but not run live: the Fathom webhook, the generic capture webhook, Slack, Teams, the custom webhook, single sign-on, and webhook security.
+- PRD roadmap: of the go-live checks, only a real Fathom meeting remains.
+- Rebuilt `docs/Commitment_Tracker_PRD_v0.10.1.pdf`. No code changes apart from `APP_VERSION`.
+
 ## [0.10.0] — 2026-10-15 — Every field syncs both ways with Google Sheets; the most recent edit wins
 
 ### Added
