@@ -27,7 +27,9 @@ All notable changes to Commitment Tracker are recorded here, newest first.
   - about 50 test cases with expected results;
   - a bug-report template;
   - host steps and a private-install appendix.
-- `src/docs_tools/build_qa_guide_pdf.py` builds that PDF. The Edge print step in `build_prd_pdf.py` moved into a shared `print_to_pdf()`, so both PDFs build the same way.
+- **End-to-End Test Runbook** (`docs/E2E_Test_Runbook.md` → `docs/Commitment_Tracker_E2E_Test_Runbook_v0.10.3.pdf`). It is the earlier 0.8.0 runbook (Fathom → Gemini → People → Sheet → Gmail), brought up to date. The old Apps Script and webhook URL are replaced by the signed script on the Integrations page, and the commands moved to `src\app.py` on `C:`. It adds sharing the Sheet with the host's Google account, columns A–F numbered from 1, and the current button labels.
+- Both documents carry the shared test server URL (`https://drowsily-posture-unmoving.ngrok-free.dev`) and the host Google account for Sheet sharing.
+- `src/docs_tools/build_qa_guide_pdf.py` builds both PDFs. The Edge print step in `build_prd_pdf.py` moved into a shared `print_to_pdf()`, so both PDFs build the same way.
 
 ### Changed
 - The git-status notes here and in the PRD were out of date. They now reflect the commits on `release/v0.10.0`.
