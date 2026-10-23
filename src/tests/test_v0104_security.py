@@ -158,6 +158,8 @@ ok("&quot;" in app_js and "&#39;" in app_js, "8a escapeHtml escapes quotes, so v
 # ---------------- 9. a missing key never silently becomes a new key (0.10.5) ----------------
 import os  # noqa: E402
 saved_env, saved_root, saved_key = os.environ.pop("COMMITMENT_TRACKER_SECRET_KEY"), secret_store.ROOT_DIR, secret_store.KEY_PATH
+real_env_setting = secret_store.env_setting
+secret_store.env_setting = lambda name: ""  # ignore this machine's saved user variables
 secret_store.ROOT_DIR = Path(tempfile.mkdtemp())
 secret_store.KEY_PATH = secret_store.ROOT_DIR / "secret.key"
 (secret_store.ROOT_DIR / "google_token.json").write_text(secret_store.PREFIX + "abc")
@@ -174,4 +176,32 @@ secret_store.get_fernet()
 ok(secret_store.KEY_PATH.exists(), "9b a brand-new install with nothing encrypted still creates its key")
 os.environ["COMMITMENT_TRACKER_SECRET_KEY"] = saved_env
 secret_store.ROOT_DIR, secret_store.KEY_PATH = saved_root, saved_key
+secret_store.env_setting = real_env_setting
 secret_store.reset()
+
+# ---------------- 10. a stale terminal still finds the saved user variable (0.10.6) ----------------
+import sys  # noqa: E402
+if sys.platform == "win32":
+    import winreg  # noqa: E402
+    probe = "CT_TEST_ENV_PROBE_0106"
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE) as k:
+        winreg.SetValueEx(k, probe, 0, winreg.REG_SZ, "from-registry")
+    try:
+        ok(probe not in os.environ and secret_store.env_setting(probe) == "from-registry",
+           "10a a variable missing from this process is read from the saved user settings")
+        os.environ[probe] = "from-process"
+        ok(secret_store.env_setting(probe) == "from-process", "10b the process's own variable still wins")
+    finally:
+        os.environ.pop(probe, None)
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE) as k:
+            winreg.DeleteValue(k, probe)
+
+# ---------------- 11. a missing key gives a readable error, not a bare 500 ----------------
+real_get_fernet = secret_store.get_fernet
+def no_key():
+    raise secret_store.MissingKeyError("COMMITMENT_TRACKER_SECRET_KEY isn't set (test)")
+secret_store.get_fernet = no_key
+r = c.post("/api/nudge-settings", json={"channel": "slack", "cadence": "day_before", "webhook_or_key": "https://hooks.example/x"})
+secret_store.get_fernet = real_get_fernet
+ok(r.status_code == 503 and "COMMITMENT_TRACKER_SECRET_KEY" in r.get_json()["error"],
+   f"11a saving settings without the key -> 503 with the reason ({r.status_code})")

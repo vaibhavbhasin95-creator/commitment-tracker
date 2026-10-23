@@ -55,8 +55,23 @@ def _encrypted_data_exists():
     return False
 
 
+def env_setting(name):
+    """An environment variable, or on Windows the saved *user* variable from
+    the registry (HKCU\\Environment) when this process doesn't have it — a
+    terminal or VS Code opened before the variable was set never sees it."""
+    value = os.environ.get(name, "").strip()
+    if value or os.name != "nt":
+        return value
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            return str(winreg.QueryValueEx(key, name)[0]).strip()
+    except OSError:
+        return ""
+
+
 def _load_key():
-    env_key = os.environ.get("COMMITMENT_TRACKER_SECRET_KEY", "").strip()
+    env_key = env_setting("COMMITMENT_TRACKER_SECRET_KEY")
     if env_key:
         return env_key.encode()
     if KEY_PATH.exists():

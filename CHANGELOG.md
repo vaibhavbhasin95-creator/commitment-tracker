@@ -16,6 +16,23 @@ All notable changes to Commitment Tracker are recorded here, newest first.
 
 ---
 
+## [0.10.6] — 2026-10-23 — Settings saves failed with 500 when the app was started from VS Code
+
+### Fixed
+- **Saving AI extraction, Nudges, Task Tracker or Transcript Source settings failed with a 500.**
+  - **Cause:** since 0.10.5 the encryption key exists only as a Windows user variable. VS Code was opened before that variable was set, so every terminal it opens lacks it, and the app had no key. As designed, it refused to create a new key with `MissingKeyError`, but that surfaced as a bare 500. It also wrote a throwaway `flask_secret.key`. Nothing was saved and nothing was lost.
+  - **Fix:** on Windows, `secret_store.env_setting()` falls back to the saved user variable in the registry (`HKCU\Environment`) when the process doesn't have it. The encryption key and the session key (`auth.load_flask_secret`) both use it, so the app works from any terminal, however old.
+- **A missing key now returns 503 with the reason,** telling you to open a new terminal or restore the key, instead of a bare 500.
+
+### Validated
+- A process without either variable decrypts the Google token and all 3 saved settings, uses the right session key, and creates no key file.
+- Tests: 3 new checks in `test_v0104_security.py`: reading the variable from the registry (the process's own value still wins), and the 503 message. 317 in total, all passing.
+
+### Action needed
+- Restart the app (Ctrl+C, then `python src\app.py`). The same terminal is fine now.
+
+---
+
 ## [0.10.5] — 2026-10-23 — Keys moved out of the project folder
 
 ### Changed

@@ -134,7 +134,7 @@ except ImportError:
 
 # Single source of truth for the app version — bump it together with a new
 # CHANGELOG.md entry (see "How versioning works" there).
-APP_VERSION = "0.10.5"
+APP_VERSION = "0.10.6"
 
 # Code lives in src/ (this folder); runtime data — the database, secret.key,
 # Google tokens, ML models — stays in the project root one level up.
@@ -314,6 +314,13 @@ def secret_unreadable(e):
     """A saved credential was encrypted with a different key — tell the user
     to re-enter it rather than failing with a bare 500."""
     return jsonify({"error": str(e)}), 409
+
+
+@app.errorhandler(secret_store.MissingKeyError)
+def secret_key_missing(e):
+    """The encryption key isn't available to this process — say so instead of
+    a bare 500 (nothing is saved, nothing is lost)."""
+    return jsonify({"error": str(e)}), 503
 
 
 @app.after_request

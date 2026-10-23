@@ -52,6 +52,8 @@ from pathlib import Path
 from flask import Blueprint, jsonify, redirect, request, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
+import secret_store
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FLASK_SECRET_PATH = PROJECT_ROOT / "flask_secret.key"
 AUTH_CONFIG_PATH = PROJECT_ROOT / "auth_config.json"
@@ -120,7 +122,7 @@ def _now():
 # ---------------------------------------------------------------------------
 
 def load_flask_secret():
-    env = os.environ.get("COMMITMENT_TRACKER_FLASK_SECRET", "").strip()
+    env = secret_store.env_setting("COMMITMENT_TRACKER_FLASK_SECRET")
     if env:
         return env
     if FLASK_SECRET_PATH.exists():
