@@ -16,7 +16,7 @@ Run (from the project root):
     python src/google_oauth_setup.py
 """
 
-from google_sheets import TOKEN_PATH, SCOPES, find_client_secret_path
+from google_sheets import TOKEN_PATH, SCOPES, find_client_secret_path, save_token
 
 
 def main():
@@ -26,8 +26,8 @@ def main():
     print(f"Using client secret: {client_secret_path.name}")
     flow = InstalledAppFlow.from_client_secrets_file(str(client_secret_path), SCOPES)
     creds = flow.run_local_server(port=0)
-    TOKEN_PATH.write_text(creds.to_json())
-    print(f"Saved credentials to {TOKEN_PATH} — Google Sheets sync is ready to use.")
+    save_token(creds)
+    print(f"Saved credentials (encrypted) to {TOKEN_PATH} — Google Sheets sync is ready to use.")
 
 
 if __name__ == "__main__":

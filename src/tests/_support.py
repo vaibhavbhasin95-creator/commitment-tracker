@@ -35,6 +35,10 @@ def use_test_secret_key():
     from cryptography.fernet import Fernet
     if not os.environ.get("COMMITMENT_TRACKER_SECRET_KEY"):
         os.environ["COMMITMENT_TRACKER_SECRET_KEY"] = Fernet.generate_key().decode()
+    # Same for the session key: without it, importing app writes a new
+    # flask_secret.key into the real project root.
+    if not os.environ.get("COMMITMENT_TRACKER_FLASK_SECRET"):
+        os.environ["COMMITMENT_TRACKER_FLASK_SECRET"] = "test-only-session-key"
     secret_store.reset()
 
 

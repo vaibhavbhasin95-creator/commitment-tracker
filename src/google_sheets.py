@@ -13,7 +13,11 @@ Run once, before the first real sync:
     python google_oauth_setup.py
 """
 
+import json
+import os
 from pathlib import Path
+
+import secret_store
 
 BASE_DIR = Path(__file__).resolve().parent.parent   # project root — credential files live there, not in src/
 TOKEN_PATH = BASE_DIR / "google_token.json"
@@ -27,13 +31,37 @@ class GoogleAuthNotReadyError(RuntimeError):
 
 
 def find_client_secret_path():
+    """CT_GOOGLE_CLIENT_SECRET_FILE wins, so the client secret can live outside
+    the project folder; otherwise the first client_secret_*.json in the root."""
+    env_path = os.environ.get("CT_GOOGLE_CLIENT_SECRET_FILE", "").strip()
+    if env_path:
+        if not Path(env_path).is_file():
+            raise GoogleAuthNotReadyError(f"CT_GOOGLE_CLIENT_SECRET_FILE points to {env_path}, which doesn't exist.")
+        return Path(env_path)
     matches = list(BASE_DIR.glob(CLIENT_SECRET_GLOB))
     if not matches:
         raise GoogleAuthNotReadyError(
             f"No {CLIENT_SECRET_GLOB} file found in {BASE_DIR} — download an OAuth "
-            "Client ID (Desktop app) JSON from the Google Cloud console first."
+            "Client ID (Desktop app) JSON from the Google Cloud console first, or set "
+            "CT_GOOGLE_CLIENT_SECRET_FILE to its path."
         )
     return matches[0]
+
+
+def save_token(creds):
+    """Writes the OAuth token encrypted with secret_store (it holds a refresh
+    token with full Sheets access and the client secret)."""
+    TOKEN_PATH.write_text(secret_store.encrypt(creds.to_json()))
+
+
+def load_token_info():
+    """The token as a dict. A token saved in plain text before 0.10.4 is read
+    as-is and re-saved encrypted."""
+    stored = TOKEN_PATH.read_text().strip()
+    info = json.loads(secret_store.decrypt(stored))
+    if not secret_store.is_encrypted(stored):
+        TOKEN_PATH.write_text(secret_store.encrypt(json.dumps(info)))
+    return info
 
 
 def get_credentials():
@@ -46,10 +74,14 @@ def get_credentials():
         raise GoogleAuthNotReadyError(
             f"{TOKEN_PATH} not found — run `python google_oauth_setup.py` once to authorize this app."
         )
-    creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
+    try:
+        info = load_token_info()
+    except secret_store.SecretUnreadable as e:
+        raise GoogleAuthNotReadyError(f"{TOKEN_PATH.name} can't be decrypted ({e}) — run `python google_oauth_setup.py` again.") from e
+    creds = Credentials.from_authorized_user_info(info, SCOPES)
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
-        TOKEN_PATH.write_text(creds.to_json())
+        save_token(creds)
     return creds
 
 
