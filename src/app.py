@@ -134,7 +134,7 @@ except ImportError:
 
 # Single source of truth for the app version — bump it together with a new
 # CHANGELOG.md entry (see "How versioning works" there).
-APP_VERSION = "0.10.6"
+APP_VERSION = "0.10.7"
 
 # Code lives in src/ (this folder); runtime data — the database, secret.key,
 # Google tokens, ML models — stays in the project root one level up.

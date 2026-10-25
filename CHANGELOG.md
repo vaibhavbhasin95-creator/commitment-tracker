@@ -16,6 +16,27 @@ All notable changes to Commitment Tracker are recorded here, newest first.
 
 ---
 
+## [0.10.7] — 2026-10-25 — Security review run 11: vulnerable dependencies, token-like text in docs
+
+### Security
+- **pypdf 6.19.0 → 6.21.2 (SEC-05, High):** fixes 11 advisories, among them CVE-2026-113786, -113789 to -113795, -115572, -115580 and -115585. pypdf reads the PDFs that users upload (`document_text.py`), so this library sees outside input.
+- **cryptography 43.0.1 → 50.0.2 (SEC-05, High):** fixes 6 advisories, among them CVE-2024-12797, CVE-2026-26007, CVE-2026-34073, CVE-2026-69248, CVE-2026-69249 and GHSA-537c-gmf6-5ccf. The Fernet API that `secret_store` uses is unchanged, and the saved settings and Google token decrypt with the new version.
+- **Dummy Slack token removed from the changelog (SEC-01, Critical).** The 0.10.4 entry quoted the test suite's fake Slack token. Outside test code, the scanner treats any token-shaped text as a real secret. The line now says "made-up dummy values" instead. The copy in git history (`768635e`) is the same fake value, so nothing needs rotating; accept SEC-02 in the auditor.
+
+### Reviewed, no change needed (run 11)
+- **EXP-03 (meeting delete / job routes):** both are already limited to the caller's own records (0.10.4).
+- **AI-04 / APP-02 (innerHTML):** the flagged values are `renderItems(...)` (which escapes internally), IDs, dates or counts.
+- **LOG-02:** "signup_allowed, register" are a config check and `app.register_blueprint`, not account actions.
+- **APP-01 (SQL f-strings):** the values are bound as parameters.
+
+### Tests
+- 317 checks, all passing with the new versions; `pip check` reports no conflicts.
+
+### Action needed
+- On another machine, run `pip install -r requirements.txt` to pick up the new versions.
+
+---
+
 ## [0.10.6] — 2026-10-23 — Settings saves failed with 500 when the app was started from VS Code
 
 ### Fixed
@@ -98,7 +119,7 @@ All notable changes to Commitment Tracker are recorded here, newest first.
 - **AI comparison page (AI-04):** every value from the model already goes through `escapeHtml`.
 - **innerHTML on the other pages (APP-02):** values users can type are escaped. The rest are numbers, IDs or fixed status values.
 - **SQL built with f-strings (APP-01):** the f-strings only build `?` placeholder lists; the values are still passed as parameters.
-- **Test credentials (SEC-01/02):** values such as `xoxb-slack-token-5555` are dummies.
+- **Test credentials (SEC-01/02):** the Slack token, API key and passwords in `src/tests/` are made-up dummy values.
 
 ### Tests
 - New suite `src/tests/test_v0104_security.py`, 23 checks, covering:

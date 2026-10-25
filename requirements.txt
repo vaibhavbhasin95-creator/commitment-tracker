@@ -8,9 +8,9 @@ scikit-learn==1.9.1
 tensorflow==2.21.0
 sentence-transformers==6.1.0
 spacy==3.8.16
-pypdf==6.19.0
+pypdf==6.21.2
 google-api-python-client==2.200.0
 google-auth-oauthlib==1.4.1
 google-auth-httplib2==0.4.2
 anthropic==1.8.0
-cryptography==43.0.1
+cryptography==50.0.2
