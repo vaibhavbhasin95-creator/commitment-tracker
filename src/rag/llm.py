@@ -3,6 +3,8 @@ import litellm
 from .errors import RagError
 
 CHAT_TIMEOUT_SECONDS = 120
+# Some servers (GPT4All's, for one) stop after about 20 tokens unless told how long a reply may be.
+DEFAULT_MAX_TOKENS = 600
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 
 # Cache the embedding model globally so it only loads once in memory.
@@ -65,10 +67,11 @@ def _friendly_error(e: Exception) -> str:
     return f"AI generation failed ({type(e).__name__})."
 
 
-def chat(settings: dict, messages: list[dict], temperature: float = 0) -> str:
+def chat(settings: dict, messages: list[dict], temperature: float = 0, max_tokens: int = DEFAULT_MAX_TOKENS) -> str:
     """
     Public function: sends messages to the configured LLM via LiteLLM and returns
-    the response text. Raises RagError on any failure.
+    the response text, at most max_tokens long. Raises RagError on any failure,
+    including a reply that was cut off at that length.
     """
     model, extra_args = _get_litellm_args(settings)
     try:
@@ -76,16 +79,19 @@ def chat(settings: dict, messages: list[dict], temperature: float = 0) -> str:
             model=model,
             messages=messages,
             temperature=temperature,
+            max_tokens=max_tokens,
             timeout=CHAT_TIMEOUT_SECONDS,
             **extra_args,
         )
     except Exception as e:
         raise RagError(_friendly_error(e)) from e
 
-    content = response.choices[0].message.content  # type: ignore[union-attr]  (non-streaming call)
-    if not content:
+    choice = response.choices[0]  # type: ignore[union-attr]  (non-streaming call)
+    if choice.finish_reason == "length":
+        raise RagError("The AI's answer was cut off because it hit the maximum reply length. Try a more specific question.")
+    if not choice.message.content:
         raise RagError("The AI provider returned an empty reply.")
-    return content
+    return choice.message.content
 
 
 def embed(texts: list[str]) -> list[list[float]]:

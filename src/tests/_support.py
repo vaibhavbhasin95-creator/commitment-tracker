@@ -44,6 +44,9 @@ use_test_secret_key()  # every suite imports this module before app
 # an upload's) already carries the extraction result, as before 0.9.0.
 import os as _os  # noqa: E402
 _os.environ.setdefault("CT_JOBS_INLINE", "1")
+# Search indexing queues its own job and loads the embedding model, so suites that aren't
+# about it keep it off; test_rag_indexer.py sets RAG_ENABLED=1 before importing this module.
+_os.environ.setdefault("RAG_ENABLED", "0")
 
 TEST_PASSWORD = "test-password-123"
 
