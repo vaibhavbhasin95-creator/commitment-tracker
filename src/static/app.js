@@ -27,7 +27,10 @@ async function api(path, options = {}) {
             window.location.href = "/";
         }
         const message = (data && data.error) || `Request failed (${res.status})`;
-        throw new Error(message);
+        const error = new Error(message);
+        error.status = res.status;  // lets a page tell failures apart (e.g. 409 "consent needed") without parsing the message
+        error.data = data;
+        throw error;
     }
     return data;
 }
@@ -137,6 +140,21 @@ async function initNav(activePage) {
         }
     }
     // [/ai-extraction v0.5.0]
+    // [rag] nav link to the Ask page, shown only when the optional feature is registered
+    // (the status route 404s when RAG_ENABLED=0).
+    if (nav) {
+        try {
+            await api("/api/rag/status");
+            const askLink = document.createElement("a");
+            askLink.href = "/ask";
+            askLink.className = "sidebar-link" + (window.location.pathname === "/ask" ? " active" : "");
+            askLink.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>Ask your meetings';
+            nav.appendChild(askLink);
+        } catch (e) {
+            // feature disabled — no link
+        }
+    }
+    // [/rag]
     if (nav) {
         const jobsLink = document.createElement("a");
         jobsLink.href = "/jobs";
