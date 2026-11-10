@@ -3138,6 +3138,11 @@ def rag_sweep():
 
 if rag_indexer is not None:
     jobs.add_periodic("search index refresh", 30, rag_sweep, first_delay=10)
+    try:
+        from rag import routes as rag_routes  # the Ask page and /api/rag/* routes
+        rag_routes.init_app(app, get_db, require_email)
+    except ImportError:
+        pass
 # ---------- [/rag] ----------
 
 
