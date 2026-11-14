@@ -16,6 +16,132 @@ All notable changes to Commitment Tracker are recorded here, newest first.
 
 ---
 
+## [0.10.7] — 2026-10-25 — Security review run 11: vulnerable dependencies, token-like text in docs
+
+### Security
+- **pypdf 6.19.0 → 6.21.2 (SEC-05, High):** fixes 11 advisories, among them CVE-2026-113786, -113789 to -113795, -115572, -115580 and -115585. pypdf reads the PDFs that users upload (`document_text.py`), so this library sees outside input.
+- **cryptography 43.0.1 → 50.0.2 (SEC-05, High):** fixes 6 advisories, among them CVE-2024-12797, CVE-2026-26007, CVE-2026-34073, CVE-2026-69248, CVE-2026-69249 and GHSA-537c-gmf6-5ccf. The Fernet API that `secret_store` uses is unchanged, and the saved settings and Google token decrypt with the new version.
+- **Dummy Slack token removed from the changelog (SEC-01, Critical).** The 0.10.4 entry quoted the test suite's fake Slack token. Outside test code, the scanner treats any token-shaped text as a real secret. The line now says "made-up dummy values" instead. The copy in git history (`768635e`) is the same fake value, so nothing needs rotating; accept SEC-02 in the auditor.
+
+### Reviewed, no change needed (run 11)
+- **EXP-03 (meeting delete / job routes):** both are already limited to the caller's own records (0.10.4).
+- **AI-04 / APP-02 (innerHTML):** the flagged values are `renderItems(...)` (which escapes internally), IDs, dates or counts.
+- **LOG-02:** "signup_allowed, register" are a config check and `app.register_blueprint`, not account actions.
+- **APP-01 (SQL f-strings):** the values are bound as parameters.
+
+### Tests
+- 317 checks, all passing with the new versions; `pip check` reports no conflicts.
+
+### Action needed
+- On another machine, run `pip install -r requirements.txt` to pick up the new versions.
+
+---
+
+## [0.10.6] — 2026-10-23 — Settings saves failed with 500 when the app was started from VS Code
+
+### Fixed
+- **Saving AI extraction, Nudges, Task Tracker or Transcript Source settings failed with a 500.**
+  - **Cause:** since 0.10.5 the encryption key exists only as a Windows user variable. VS Code was opened before that variable was set, so every terminal it opens lacks it, and the app had no key. As designed, it refused to create a new key with `MissingKeyError`, but that surfaced as a bare 500. It also wrote a throwaway `flask_secret.key`. Nothing was saved and nothing was lost.
+  - **Fix:** on Windows, `secret_store.env_setting()` falls back to the saved user variable in the registry (`HKCU\Environment`) when the process doesn't have it. The encryption key and the session key (`auth.load_flask_secret`) both use it, so the app works from any terminal, however old.
+- **A missing key now returns 503 with the reason,** telling you to open a new terminal or restore the key, instead of a bare 500.
+
+### Validated
+- A process without either variable decrypts the Google token and all 3 saved settings, uses the right session key, and creates no key file.
+- Tests: 3 new checks in `test_v0104_security.py`: reading the variable from the registry (the process's own value still wins), and the 503 message. 317 in total, all passing.
+
+### Action needed
+- Restart the app (Ctrl+C, then `python src\app.py`). The same terminal is fine now.
+
+---
+
+## [0.10.5] — 2026-10-23 — Keys moved out of the project folder
+
+### Changed
+- **The keys are no longer files in the project folder.** `secret.key` and `flask_secret.key` were deleted after the owner backed them up offline. The app now reads the keys from the Windows user environment variables `COMMITMENT_TRACKER_SECRET_KEY` and `COMMITMENT_TRACKER_FLASK_SECRET`. Both were set from the old files and checked to match before deletion.
+- **Other housekeeping on the owner's side:** `_snapshots/v0.7.3/commitment_tracker.db.bak` (with its old API key) was deleted, `Curent Status/` was moved out of the project, and the GitHub repo is now private.
+
+### Fixed
+- **A missing key no longer silently becomes a new one.** Before, if neither the variable nor `secret.key` was found, `secret_store` generated a new key. Every saved credential, and since 0.10.4 the Google token, then became unreadable. This happens in any terminal or VS Code window opened before the variable was set. Now, if encrypted data already exists, the app stops with `MissingKeyError` and explains what to do. A brand-new install still creates its key as before.
+
+### Validated on the running app
+- The app was restarted with the variables set and serves `0.10.4`.
+  - The served `app.js` escapes quotes.
+  - A failed sign-in is written to `auth_events`.
+  - The Google token and all 3 saved integration settings decrypt.
+  - With the variable missing, the app refuses to start and no stray key file is created.
+- The QA agent's own test for the signup race, `test_exception_07` from run 20261023-092958, failed before the fix and now passes 3 out of 3 runs.
+- Tests: 2 new checks in `test_v0104_security.py`, 314 in total, all passing.
+- **The test suite no longer writes `flask_secret.key` into the project root.** `_support.py` already gave the tests a throwaway credential key, but never a throwaway session key. With the file removed, importing the app created one. The helper now sets `COMMITMENT_TRACKER_FLASK_SECRET` as well.
+
+### Known issues
+- **Google Sheets sync needs re-authorising.** Google answers `invalid_grant: Token has been expired or revoked`. The last successful sync was 2026-10-16, which fits Google's 7-day limit on refresh tokens for OAuth apps in "Testing" status. This is not caused by the encryption: the decrypted token is byte-for-byte the old one. To fix it, run `python src/google_oauth_setup.py` once.
+
+---
+
+## [0.10.4] — 2026-10-23 — Security review (run 7) and QA report fixes
+
+### Fixed
+- **Two signups for the same email at once no longer crash.** Before, both could pass the "account exists?" check, and the loser hit an unhandled `IntegrityError` or "database is locked" (QA bug C07-L3-02). Now the loser gets the normal 409, or 503 "server is busy" if the database is locked (`src/auth.py`).
+- **Deleting a meeting no longer touches other accounts (EXP-03).** `DELETE /api/meetings/<id>` with another account's meeting ID already returned 404. But before checking ownership, it had unlinked that meeting's transcript-log entries and cancelled its queued jobs. `_delete_meetings` now narrows the IDs to the caller's own meetings first (`src/app.py`).
+- **XSS through quote characters (found during this review, not in the report).** `escapeHtml` in `static/app.js` used the textContent → innerHTML trick, which leaves `"` and `'` unescaped. It is used inside attributes, e.g. `value="${escapeHtml(p.first_name)}"` on People, so a name containing a quote could add an event handler. It now escapes `& < > " '`.
+
+### Security
+- **Sign-in audit trail (LOG-02).** A new `auth_events` table and the `commitment_tracker.auth` logger record the following, with email, IP and time but never the password:
+  - signup, login, failed login, lockout
+  - logout and logout everywhere
+  - password change (successful and failed)
+  - SSO sign-in, failed SSO sign-in, refused SSO sign-in
+- **Stronger password hashing (DATA-02).** New hashes use scrypt N=2^17, r=8, p=1, OWASP's minimum; Werkzeug's default was N=2^15. Existing hashes are upgraded the next time the user signs in. One hash now takes about 0.9 s and 128 MB.
+- **Prompt-injection guard (AI-01).**
+  - Transcripts (`ai_extraction.py`), reminder drafts (`ai_writer.py`) and the custom app name on the AI setup steps (`app.py`) are wrapped in tags (`<transcript>`, `<reminder>`, `<app_name>`). A closing tag inside the text is neutralised, so it can't end the wrapper early.
+  - The system prompts tell the model to treat that text as untrusted data.
+  - An AI-tailored email that adds a link not in the original draft is rejected, and the draft is sent as written.
+  - The helpers live in the new module `src/prompt_safety.py`.
+- **Masking before data reaches the AI provider (AI-02).**
+  - Email addresses and phone numbers are replaced with `[EMAIL_1]`, `[PHONE_1]` before a transcript or draft is sent to the provider.
+  - The real values are restored in the reply.
+  - Dates are not treated as phone numbers.
+- **Google token encrypted at rest (DATA-03).**
+  - `google_token.json` is now stored encrypted with `secret_store`, because it holds a refresh token and the OAuth client secret.
+  - A token saved in plain text is encrypted automatically the first time it is read; the live token has already been converted.
+  - The client-secret JSON can now live outside the project folder: set `CT_GOOGLE_CLIENT_SECRET_FILE` to its path.
+- **File permissions (CTX-03).** The following are now readable only by the Windows account that runs the app, SYSTEM and Administrators. Before, every local user could read them and "Authenticated Users" could modify them.
+  - `Curent Status/` and `Curent Status.zip`
+  - `_snapshots/`
+  - `secret.key` and `flask_secret.key`
+  - `google_token.json` and `client_secret_*.json`
+  - `commitment_tracker.db`
+  - To undo: `icacls <path> /reset /T`.
+- **Dependencies pinned (SEC-04).** `requirements.txt` now lists exact versions, the ones installed when the tests last passed.
+
+### Reviewed, no change needed
+- **`POST /api/jobs/<id>/<action>` (EXP-03):** `jobs.retry` and `jobs.cancel` already filter on `user_email`.
+- **AI comparison page (AI-04):** every value from the model already goes through `escapeHtml`.
+- **innerHTML on the other pages (APP-02):** values users can type are escaped. The rest are numbers, IDs or fixed status values.
+- **SQL built with f-strings (APP-01):** the f-strings only build `?` placeholder lists; the values are still passed as parameters.
+- **Test credentials (SEC-01/02):** the Slack token, API key and passwords in `src/tests/` are made-up dummy values.
+
+### Tests
+- New suite `src/tests/test_v0104_security.py`, 23 checks, covering:
+  - the signup race
+  - the hash upgrade
+  - the audit trail
+  - cross-account meeting delete
+  - the prompt wrapper and masking round trip
+  - the email link guard
+  - token encryption
+  - attribute-safe escaping
+- The existing 289 checks pass unchanged.
+
+### Still to do (by the owner — see the review notes)
+- Remove `FY2027_Financial_Planning_Meeting_Transcript.*` from git history (commits `f2905ef` and `48f9054`) and force-push.
+- Rotate the API key stored in plain text in `_snapshots/v0.7.3/commitment_tracker.db.bak`, then delete or encrypt that snapshot.
+- Move `secret.key` and the client-secret JSON out of the project folder.
+- Turn on BitLocker.
+- Update the security auditor's data catalog and approved processors.
+
+---
+
 ## [0.10.3] — 2026-10-16 — QA handover pack
 
 ### Added

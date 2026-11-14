@@ -111,6 +111,7 @@ import jobs
 import live_events
 import notifications
 import people_directory
+import prompt_safety
 import secret_store
 import webhook_security
 
@@ -133,7 +134,7 @@ except ImportError:
 
 # Single source of truth for the app version — bump it together with a new
 # CHANGELOG.md entry (see "How versioning works" there).
-APP_VERSION = "0.10.3"
+APP_VERSION = "0.10.7"
 
 # Code lives in src/ (this folder); runtime data — the database, secret.key,
 # Google tokens, ML models — stays in the project root one level up.
@@ -313,6 +314,13 @@ def secret_unreadable(e):
     """A saved credential was encrypted with a different key — tell the user
     to re-enter it rather than failing with a bare 500."""
     return jsonify({"error": str(e)}), 409
+
+
+@app.errorhandler(secret_store.MissingKeyError)
+def secret_key_missing(e):
+    """The encryption key isn't available to this process — say so instead of
+    a bare 500 (nothing is saved, nothing is lost)."""
+    return jsonify({"error": str(e)}), 503
 
 
 @app.after_request
@@ -992,6 +1000,13 @@ def _delete_meetings(db, email, meeting_ids):
     """Deletes meetings (and their tasks) owned by this account. Their
     transcript-source log entries are kept but unlinked; queued extraction
     jobs for them are cancelled. Returns (meetings, tasks) deleted."""
+    if not meeting_ids:
+        return 0, 0
+    # Narrow to this account's meetings first, so the log unlinking and job
+    # cancelling below never touch another account's meeting.
+    marks = ",".join("?" * len(meeting_ids))
+    meeting_ids = [r["id"] for r in db.execute(
+        f"SELECT id FROM meetings WHERE owner_email = ? AND id IN ({marks})", (email, *meeting_ids))]
     if not meeting_ids:
         return 0, 0
     marks = ",".join("?" * len(meeting_ids))
@@ -3003,13 +3018,16 @@ def _ai_setup_steps(app_name, category):
         return None
 
     context = SETUP_STEPS_CATEGORY_CONTEXT.get(category, "connecting this app to another tool")
+    # The app name is typed by the user, so it is fenced and capped (AI-01).
     prompt = (
-        f"A user wants to connect a third-party app called \"{app_name}\" to their own tool, "
-        f"for the purpose of {context}. List 3-6 short, concrete steps for where in {app_name} "
+        "A user wants to connect a third-party app, named below, to their own tool, "
+        f"for the purpose of {context}. List 3-6 short, concrete steps for where in that app "
         "they'd typically find or generate the webhook URL / API key they'd need. "
         "Reply with ONLY a plain numbered list, one short step per line, no preamble, "
         "no markdown formatting, no closing remarks. If you aren't confident about this "
-        "specific app, give your best generic guess for a typical SaaS app instead of refusing."
+        "specific app, give your best generic guess for a typical SaaS app instead of refusing.\n"
+        + prompt_safety.untrusted_note("app_name") + "\n\n"
+        + prompt_safety.fence("app_name", (app_name or "")[:100])
     )
 
     body = json.dumps({

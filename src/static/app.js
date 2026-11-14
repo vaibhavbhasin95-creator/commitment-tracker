@@ -60,10 +60,16 @@ function formatDate(iso) {
     return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
+// Safe for element text and for quoted attribute values (value="…", title="…").
+// The old textContent → innerHTML trick left " and ' unescaped, so a value
+// with a quote could break out of an attribute.
 function escapeHtml(str) {
-    const div = document.createElement("div");
-    div.textContent = str == null ? "" : str;
-    return div.innerHTML;
+    return String(str == null ? "" : str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
 }
 
 function formatDateTime(iso) {

@@ -27,6 +27,7 @@ import re
 import urllib.error
 import urllib.request
 
+import prompt_safety
 import secret_store
 
 TIMEOUT_SECONDS = 60
@@ -69,7 +70,12 @@ Hard rules:
 - Keep every fact exactly as given: task, due date, meeting name, names, and every specific ask or instruction in the draft. Never invent facts, deadlines, consequences, links or promises.
 - Keep the sender's intent and sign-off name. Write in the draft's language.
 - Plain text only (no markdown, no HTML). Subject line under 90 characters.
+- """ + prompt_safety.untrusted_note("reminder") + """
+- Tokens such as [EMAIL_1] or [PHONE_1] stand for masked values: keep them exactly as written.
 Reply with only a JSON object: {"subject": "...", "body": "...", "tone": "<3-8 words describing the tone you chose>"}"""
+
+# Links in the model's reply must already be in the draft (output check, AI-01).
+URL_RE = re.compile(r"(?i)\b(?:https?://|www\.)[^\s<>\"')]+")
 
 
 class AIWriterError(RuntimeError):
@@ -200,21 +206,26 @@ def personalise(db, account_email, config, commitment, reason, designation, send
         return result
     try:
         engine, engine_config = engine_override or load_engine(db, account_email)
-        message = (
+        message = prompt_safety.fence("reminder", (
             f"Recipient: {values['owner_name']}\n"
             f"Designation: {designation or 'unknown'}\n"
             f"Reminder reason: {values['reason']}\n"
             f"Task: {values['task']}\nDue date: {values['due_date']}\nStatus: {values['status']}\n"
             f"Meeting: {values['meeting']}\nSender: {sender_name or 'the sender'}\n\n"
             f"Draft subject: {subject}\n\nDraft body:\n{body}"
-        )
+        ))
+        # Emails and phone numbers never reach the provider; they're put back below.
+        message, pii = prompt_safety.mask_pii(message)
         if engine == "anthropic":
             text, model = _call_anthropic(engine_config, message)
         elif engine == "openai_compatible":
             text, model = _call_openai_compatible(engine_config, message)
         else:
             raise AIWriterError(f"unknown AI engine '{engine}'")
-        new_subject, new_body, tone = _parse(text)
+        new_subject, new_body, tone = _parse(prompt_safety.unmask_pii(text, pii))
+        added_links = set(URL_RE.findall(new_subject + " " + new_body)) - set(URL_RE.findall(subject + " " + body))
+        if added_links:
+            raise AIWriterError("the model's version added a link that wasn't in your draft")
     except AIWriterError as e:
         result["note"] = f"your draft is used as written (AI tailoring unavailable: {e})"
         return result

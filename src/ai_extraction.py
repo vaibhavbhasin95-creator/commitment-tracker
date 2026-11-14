@@ -32,6 +32,7 @@ from datetime import date, datetime
 
 from flask import Blueprint, jsonify, request, send_from_directory
 
+import prompt_safety
 import secret_store
 
 ENGINES = ("builtin", "anthropic", "openai_compatible")
@@ -85,7 +86,9 @@ For each commitment return:
 - confidence: 0 to 1, how sure you are this is a real commitment with the right owner.
 - source_quote: the sentence from the transcript that states it, copied verbatim.
 
-Return every distinct commitment once. If there are none, return an empty list."""
+Return every distinct commitment once. If there are none, return an empty list.
+
+""" + prompt_safety.untrusted_note("transcript") + """ Tokens such as [EMAIL_1] or [PHONE_1] stand for masked values: copy them unchanged."""
 
 OUTPUT_SCHEMA = {
     "type": "object",
@@ -169,7 +172,7 @@ def _model_for(engine, config):
 # ---------------------------------------------------------------------------
 
 def _user_message(transcript_text, meeting_date):
-    return f"Meeting date: {meeting_date}\n\nTranscript:\n{transcript_text}"
+    return f"Meeting date: {meeting_date}\n\nTranscript:\n{prompt_safety.fence('transcript', transcript_text)}"
 
 
 def _call_anthropic(config, transcript_text, meeting_date):
@@ -302,12 +305,21 @@ def _parse_items(text):
 
 
 def run_engine(engine, config, transcript_text, meeting_date):
-    """Returns (items, model_used). Raises AIExtractionError."""
+    """Returns (items, model_used). Raises AIExtractionError. Email addresses
+    and phone numbers are masked before the transcript leaves the machine and
+    restored in the returned items."""
+    masked, pii = prompt_safety.mask_pii(transcript_text)
     if engine == "anthropic":
-        return _call_anthropic(config, transcript_text, meeting_date)
-    if engine == "openai_compatible":
-        return _call_openai_compatible(config, transcript_text, meeting_date)
-    raise AIExtractionError(f"unknown engine '{engine}'")
+        items, model = _call_anthropic(config, masked, meeting_date)
+    elif engine == "openai_compatible":
+        items, model = _call_openai_compatible(config, masked, meeting_date)
+    else:
+        raise AIExtractionError(f"unknown engine '{engine}'")
+    if pii:
+        for item in items:
+            for key in ("task_text", "owner_name", "source_quote"):
+                item[key] = prompt_safety.unmask_pii(item[key], pii)
+    return items, model
 
 
 # ---------------------------------------------------------------------------

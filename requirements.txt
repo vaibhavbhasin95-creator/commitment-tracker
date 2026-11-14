@@ -1,14 +1,17 @@
-flask
-pandas
-numpy
-scikit-learn
-tensorflow
-sentence-transformers
-spacy
-pypdf
-google-api-python-client
-google-auth-oauthlib
-google-auth-httplib2
-anthropic
-cryptography
-litellm
+# Pinned to the versions the 289-check suite passes with (security review SEC-04).
+# To upgrade: bump a version here, pip install -r requirements.txt, run
+# python src/tests/run_all.py, and note it in CHANGELOG.md.
+flask==3.1.3
+pandas==3.0.6
+numpy==2.5.3
+scikit-learn==1.9.1
+tensorflow==2.21.0
+sentence-transformers==6.1.0
+spacy==3.8.16
+pypdf==6.21.2
+google-api-python-client==2.200.0
+google-auth-oauthlib==1.4.1
+google-auth-httplib2==0.4.2
+anthropic==1.8.0
+cryptography==50.0.2
+litellm==1.106.0

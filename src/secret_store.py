@@ -12,10 +12,12 @@ The key comes from, in order:
      generate one with `python -c "from cryptography.fernet import Fernet;
      print(Fernet.generate_key().decode())"`);
   2. secret.key in the project root (next to commitment_tracker.db), created
-     automatically on first use.
+     automatically on first use — but only while nothing encrypted exists
+     yet. Once credentials are saved, a missing key stops with
+     MissingKeyError instead of creating a new one.
 
-Losing the key makes every saved credential unreadable — the app keeps
-running, but each integration has to be re-entered in Integrations.
+Losing the key makes every saved credential unreadable — each integration
+then has to be re-entered in Integrations.
 """
 
 import json
@@ -27,7 +29,8 @@ from cryptography.fernet import Fernet, InvalidToken
 PREFIX = "enc:v1:"
 # Runtime data (the DB, this key, Google tokens) lives in the project root,
 # one level above src/ where the code is.
-KEY_PATH = Path(__file__).resolve().parent.parent / "secret.key"
+ROOT_DIR = Path(__file__).resolve().parent.parent
+KEY_PATH = ROOT_DIR / "secret.key"
 
 _fernet = None
 
@@ -36,12 +39,52 @@ class SecretUnreadable(Exception):
     """A stored value was encrypted with a different key (or is corrupted)."""
 
 
+class MissingKeyError(RuntimeError):
+    """No key is available, but data encrypted with an earlier key exists."""
+
+
+def _encrypted_data_exists():
+    """True if the real DB or the Google token already hold values encrypted
+    with some key (raw byte search for the prefix; cheap at startup)."""
+    for path in (ROOT_DIR / "commitment_tracker.db", ROOT_DIR / "google_token.json"):
+        try:
+            if PREFIX.encode() in path.read_bytes():
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def env_setting(name):
+    """An environment variable, or on Windows the saved *user* variable from
+    the registry (HKCU\\Environment) when this process doesn't have it — a
+    terminal or VS Code opened before the variable was set never sees it."""
+    value = os.environ.get(name, "").strip()
+    if value or os.name != "nt":
+        return value
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            return str(winreg.QueryValueEx(key, name)[0]).strip()
+    except OSError:
+        return ""
+
+
 def _load_key():
-    env_key = os.environ.get("COMMITMENT_TRACKER_SECRET_KEY", "").strip()
+    env_key = env_setting("COMMITMENT_TRACKER_SECRET_KEY")
     if env_key:
         return env_key.encode()
     if KEY_PATH.exists():
         return KEY_PATH.read_bytes().strip()
+    # The key lives outside the project (env var) since 0.10.5. A terminal
+    # opened before the variable was set doesn't see it; generating a new key
+    # then would silently make every saved credential unreadable.
+    if _encrypted_data_exists():
+        raise MissingKeyError(
+            "COMMITMENT_TRACKER_SECRET_KEY isn't set and there is no secret.key, but saved credentials are "
+            "encrypted with a key. Open a new terminal (or restart VS Code) so it picks up the variable, or "
+            "restore secret.key from your backup. Not creating a new key."
+        )
     key = Fernet.generate_key()
     KEY_PATH.write_bytes(key)
     print(f"[secrets] generated a new encryption key at {KEY_PATH} — back it up; without it saved credentials can't be read")

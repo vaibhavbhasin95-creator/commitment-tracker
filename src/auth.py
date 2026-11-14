@@ -37,8 +37,10 @@ the app runs on:
 import base64
 import hashlib
 import json
+import logging
 import os
 import secrets
+import sqlite3
 import threading
 import time
 import urllib.error
@@ -50,11 +52,16 @@ from pathlib import Path
 from flask import Blueprint, jsonify, redirect, request, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
+import secret_store
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FLASK_SECRET_PATH = PROJECT_ROOT / "flask_secret.key"
 AUTH_CONFIG_PATH = PROJECT_ROOT / "auth_config.json"
 
 MIN_PASSWORD_LENGTH = 10
+# scrypt at OWASP's minimum (N=2^17, r=8, p=1; ~128 MB per hash). Werkzeug's
+# default is N=2^15; older hashes are upgraded at the next successful sign-in.
+PASSWORD_HASH_METHOD = "scrypt:131072:8:1"
 LOGIN_LOCKOUT_FAILURES = 5          # failures within the window before locking
 LOGIN_LOCKOUT_WINDOW = 15 * 60      # seconds
 SESSION_LIFETIME = timedelta(days=14)
@@ -65,6 +72,14 @@ CSRF_HEADER = "X-CT-Request"
 CSRF_EXEMPT_PREFIXES = ("/api/webhooks/",)
 
 SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS auth_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    event TEXT NOT NULL,             -- e.g. 'login', 'login_failed', 'password_changed'
+    email TEXT,
+    ip TEXT,
+    detail TEXT
+);
 CREATE TABLE IF NOT EXISTS user_identities (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_email TEXT NOT NULL,
@@ -107,7 +122,7 @@ def _now():
 # ---------------------------------------------------------------------------
 
 def load_flask_secret():
-    env = os.environ.get("COMMITMENT_TRACKER_FLASK_SECRET", "").strip()
+    env = secret_store.env_setting("COMMITMENT_TRACKER_FLASK_SECRET")
     if env:
         return env
     if FLASK_SECRET_PATH.exists():
@@ -158,7 +173,35 @@ def password_problem(password):
 
 
 def hash_password(password):
-    return generate_password_hash(password)
+    return generate_password_hash(password, method=PASSWORD_HASH_METHOD)
+
+
+def needs_rehash(stored):
+    """True for a hash made with weaker settings than PASSWORD_HASH_METHOD."""
+    return bool(stored) and not stored.startswith(PASSWORD_HASH_METHOD + "$")
+
+
+# ---------------------------------------------------------------------------
+# Audit trail
+# ---------------------------------------------------------------------------
+
+audit_logger = logging.getLogger("commitment_tracker.auth")
+
+
+def audit(db, event, email=None, detail=None):
+    """Records a sign-in / account event in auth_events and the app log. Never
+    stores passwords or tokens. Inside a request the caller's IP is included."""
+    try:
+        ip = request.remote_addr or "?"
+    except RuntimeError:  # outside a request (e.g. manage_users.py)
+        ip = None
+    audit_logger.info("auth event=%s email=%s ip=%s %s", event, email, ip, detail or "")
+    try:
+        db.execute("INSERT INTO auth_events (created_at, event, email, ip, detail) VALUES (?, ?, ?, ?, ?)",
+                   (_now(), event, email, ip, (detail or "")[:300] or None))
+        db.commit()
+    except sqlite3.Error as e:  # auditing must never break sign-in
+        audit_logger.warning("couldn't record auth event %s: %s", event, e)
 
 
 class LoginThrottle:
@@ -399,6 +442,7 @@ def init_app(app, get_db, notify=None):
     @bp.route("/api/auth/signup", methods=["POST"])
     def signup():
         if not signup_allowed():
+            audit_logger.info("auth event=signup_refused reason=signup_disabled ip=%s", client_ip())
             return jsonify({"error": "new accounts are turned off — ask the administrator, or sign in with SSO"}), 403
         data = request.get_json(force=True) or {}
         email = (data.get("email") or "").strip().lower()
@@ -413,17 +457,31 @@ def init_app(app, get_db, notify=None):
         migrate(db)
         existing = db.execute("SELECT password_hash FROM users WHERE email = ?", (email,)).fetchone()
         if existing is not None:
+            audit(db, "signup_refused", email, "account exists")
             db.close()
             if existing["password_hash"]:
                 return jsonify({"error": "an account with this email already exists — sign in instead"}), 409
             return jsonify({"error": "this account was created before passwords existed. Sign in with SSO, or set "
                                      "a password on the app's computer: python src/manage_users.py set-password "
                                      + email}), 409
-        db.execute(
-            "INSERT INTO users (email, created_at, password_hash, display_name, session_version) VALUES (?, ?, ?, ?, 1)",
-            (email, _now(), hash_password(password), name),
-        )
-        db.commit()
+        # Two signups for the same email can both pass the check above; the
+        # UNIQUE constraint decides, and the loser gets the same 409.
+        try:
+            db.execute(
+                "INSERT INTO users (email, created_at, password_hash, display_name, session_version) VALUES (?, ?, ?, ?, 1)",
+                (email, _now(), hash_password(password), name),
+            )
+            db.commit()
+        except sqlite3.IntegrityError:
+            db.rollback()
+            db.close()
+            return jsonify({"error": "an account with this email already exists — sign in instead"}), 409
+        except sqlite3.OperationalError as e:
+            db.rollback()
+            db.close()
+            audit_logger.warning("signup for %s failed: %s", email, e)
+            return jsonify({"error": "the server is busy — try again in a moment"}), 503
+        audit(db, "signup", email)
         start_session(db, email)
         db.close()
         return jsonify({"email": email}), 201
@@ -436,6 +494,7 @@ def init_app(app, get_db, notify=None):
         keys = (f"email:{email}", f"ip:{client_ip()}")
         wait = throttle.locked_for(*keys)
         if wait:
+            audit_logger.info("auth event=login_locked email=%s ip=%s", email, client_ip())
             return jsonify({"error": f"too many failed attempts — try again in {int(wait // 60) + 1} min"}), 429
         db = get_db()
         migrate(db)
@@ -446,12 +505,17 @@ def init_app(app, get_db, notify=None):
         valid = check_password_hash(stored, password) and stored is not _DUMMY_HASH
         if not valid:
             throttle.fail(*keys)
+            audit(db, "login_failed", email, None if row else "unknown account")
             db.close()
             if row is not None and not row["password_hash"]:
                 return jsonify({"error": "this account has no password yet — sign in with SSO, or run "
                                          "python src/manage_users.py set-password " + email}), 401
             return jsonify({"error": "wrong email or password"}), 401
         throttle.clear(*keys)
+        if needs_rehash(stored):
+            db.execute("UPDATE users SET password_hash = ? WHERE email = ?", (hash_password(password), email))
+            db.commit()
+        audit(db, "login", email)
         start_session(db, email)
         db.close()
         return jsonify({"email": email})
@@ -472,7 +536,13 @@ def init_app(app, get_db, notify=None):
 
     @bp.route("/api/logout", methods=["POST"])
     def logout():
+        email = session.get("email")
         session.clear()
+        if email:
+            db = get_db()
+            migrate(db)
+            audit(db, "logout", email)
+            db.close()
         return jsonify({"ok": True})
 
     @bp.route("/api/auth/logout-everywhere", methods=["POST"])
@@ -484,6 +554,7 @@ def init_app(app, get_db, notify=None):
             return jsonify({"error": "not signed in"}), 401
         db.execute("UPDATE users SET session_version = session_version + 1 WHERE email = ?", (email,))
         db.commit()
+        audit(db, "logout_everywhere", email)
         db.close()
         session.clear()
         return jsonify({"ok": True})
@@ -498,6 +569,7 @@ def init_app(app, get_db, notify=None):
         data = request.get_json(force=True) or {}
         row = db.execute("SELECT password_hash FROM users WHERE email = ?", (email,)).fetchone()
         if row["password_hash"] and not check_password_hash(row["password_hash"], data.get("current_password") or ""):
+            audit(db, "password_change_failed", email, "wrong current password")
             db.close()
             return jsonify({"error": "your current password is wrong"}), 400
         new = data.get("new_password") or ""
@@ -508,6 +580,7 @@ def init_app(app, get_db, notify=None):
         db.execute("UPDATE users SET password_hash = ?, session_version = session_version + 1 WHERE email = ?",
                    (hash_password(new), email))
         db.commit()
+        audit(db, "password_changed", email)
         start_session(db, email)  # keep this browser signed in; every other session ends
         db.close()
         return jsonify({"ok": True})
@@ -569,6 +642,7 @@ def init_app(app, get_db, notify=None):
             email = validate_id_token(claims, provider, pending["nonce"])
             sign_in_sso_user(get_db, provider_id, str(claims.get("sub")), email, claims.get("name"))
         except AuthError as e:
+            audit_logger.info("auth event=sso_failed provider=%s ip=%s reason=%s", provider_id, client_ip(), e)
             return redirect("/?error=" + urllib.parse.quote(str(e)))
         return redirect("/dashboard")
 
@@ -583,6 +657,7 @@ def init_app(app, get_db, notify=None):
             user = db.execute("SELECT email FROM users WHERE email = ?", (email,)).fetchone()
             if user is None:
                 if not signup_allowed():
+                    audit(db, "sso_refused", email, f"{provider_id}: signup disabled")
                     db.close()
                     raise AuthError("there's no account for this email and new accounts are turned off")
                 db.execute("INSERT INTO users (email, created_at, display_name, session_version) VALUES (?, ?, ?, 1)",
@@ -592,10 +667,11 @@ def init_app(app, get_db, notify=None):
         db.execute("UPDATE user_identities SET last_used_at = ? WHERE provider = ? AND subject = ?",
                    (_now(), provider_id, subject))
         db.commit()
+        audit(db, "sso_login", email, provider_id)
         start_session(db, email)
         db.close()
 
     app.register_blueprint(bp)
 
 
-_DUMMY_HASH = generate_password_hash(secrets.token_urlsafe(16))
+_DUMMY_HASH = hash_password(secrets.token_urlsafe(16))
