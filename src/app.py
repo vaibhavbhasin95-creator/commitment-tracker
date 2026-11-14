@@ -696,6 +696,8 @@ def job_extract_commitments(payload, job):
                              text=None if turns else meeting["transcript_excerpt"], turns=turns)
     db.commit()
     db.close()
+    # Index even when extraction failed: the transcript is searchable regardless.
+    queue_rag_index(meeting["owner_email"], meeting["id"])
     if outcome["error"]:
         raise jobs.PermanentError(outcome["error"])
     email = meeting["owner_email"]
@@ -762,6 +764,24 @@ def queue_extraction(db, email, meeting_id, turns=None):
         "synced_to_tracker": result.get("synced_to_tracker", 0),
         "tracker_sync_error": result.get("tracker_sync_error"),
     }
+
+
+def queue_rag_index(email, meeting_id):
+    """Queues (re)indexing of a meeting for search (rag/). Never raises: search is optional and must
+    not break an upload. Skipped when RAG is off and when jobs run inline (tests), because indexing
+    loads the embedding model."""
+    if rag_indexer is None or jobs.inline_mode():
+        return None
+    db = get_db()
+    try:
+        job_id = jobs.enqueue(db, email, "index_meeting", {"meeting_id": meeting_id}, meeting_id=meeting_id, max_attempts=2)
+        db.commit()
+    except Exception:
+        return None
+    finally:
+        db.close()
+    jobs.after_commit(job_id)
+    return job_id
 
 
 def _insert_extracted_commitments(db, meeting_id, extracted):
@@ -993,6 +1013,8 @@ def _delete_meetings(db, email, meeting_ids):
     tasks = _delete_commitments(db, f"m.owner_email = ? AND m.id IN ({marks})", (email, *meeting_ids))
     db.execute(f"UPDATE transcript_sync_log SET meeting_id = NULL WHERE meeting_id IN ({marks})", meeting_ids)
     jobs.cancel_for_meetings(db, meeting_ids)
+    if rag_indexer is not None:
+        rag_indexer.delete_index(db, email, meeting_ids)  # [rag] a deleted meeting must stop being searchable
     meetings = db.execute(f"DELETE FROM meetings WHERE owner_email = ? AND id IN ({marks})", (email, *meeting_ids)).rowcount
     return meetings, tasks
 
@@ -1050,8 +1072,12 @@ def clear_commitments():
             db.close()
             return jsonify({"error": "meeting not found"}), 404
         tasks = _delete_commitments(db, "m.owner_email = ? AND m.id = ?", (email, data["meeting_id"]))
+        if rag_indexer is not None:
+            rag_indexer.delete_index(db, email, [data["meeting_id"]], kind="commitment")  # [rag]
     else:
         tasks = _delete_commitments(db, "m.owner_email = ?", (email,))
+        if rag_indexer is not None:
+            rag_indexer.delete_index(db, email, kind="commitment")  # [rag]
     db.commit()
     db.close()
     notify(email, "commitments_changed", cleared=tasks)
@@ -3071,6 +3097,71 @@ if os.environ.get("AI_EXTRACTION_ENABLED", "1") != "0":
     except ImportError:
         ai_extraction = None
 # ---------- [/ai-extraction v0.5.0] ----------
+
+
+# ---------- [rag] optional feature — remove this block (and the [rag] lines above) to revert ----------
+# Search over meetings (src/rag/). Each meeting's transcript and commitments are indexed in a
+# background job; deleting meetings or tasks also removes their index rows. RAG_ENABLED=0 turns
+# it off: nothing is indexed and the delete steps are skipped.
+rag_indexer = None
+if os.environ.get("RAG_ENABLED", "1") != "0":
+    try:
+        from rag import indexer as rag_indexer
+    except ImportError:
+        rag_indexer = None
+
+
+@jobs.handler("index_meeting", "Index meeting for search")
+def job_index_meeting(payload, job):
+    if rag_indexer is None:
+        raise jobs.PermanentError("search indexing is turned off")
+    db = get_db()
+    try:
+        chunks = rag_indexer.index_meeting(db, payload.get("meeting_id"))
+    except rag_indexer.MeetingNotFound as e:
+        raise jobs.PermanentError("the meeting was deleted before indexing ran") from e
+    finally:
+        db.close()
+    return {"chunks_indexed": chunks}
+
+
+def _enqueue_rag_index_job(db, email, meeting_id):
+    """Queues a re-index unless one is already waiting: it reads the latest data when it runs."""
+    jobs.ensure_schema(db)
+    waiting = db.execute("SELECT 1 FROM jobs WHERE kind = 'index_meeting' AND meeting_id = ? AND status = 'queued'",
+                         (meeting_id,)).fetchone()
+    if not waiting:
+        jobs.enqueue(db, email, "index_meeting", {"meeting_id": meeting_id}, meeting_id=meeting_id, max_attempts=2)
+
+
+_rag_prepared = False
+
+
+def rag_sweep():
+    """Keeps the search index fresh without anyone asking. Triggers mark a meeting whenever its transcript,
+    title, date or tasks change, from any route, webhook or sheet edit; this queues one re-index per
+    meeting once it has been quiet for a few seconds. The first run also marks meetings never indexed."""
+    global _rag_prepared
+    if rag_indexer is None:
+        return
+    db = get_db()
+    try:
+        if not _rag_prepared:
+            rag_indexer.prepare(db)
+            _rag_prepared = True
+        rag_indexer.sweep_dirty(db, _enqueue_rag_index_job)
+    finally:
+        db.close()
+
+
+if rag_indexer is not None:
+    jobs.add_periodic("search index refresh", 30, rag_sweep, first_delay=10)
+    try:
+        from rag import routes as rag_routes  # the Ask page and /api/rag/* routes
+        rag_routes.init_app(app, get_db, require_email)
+    except ImportError:
+        pass
+# ---------- [/rag] ----------
 
 
 def warn_missing_packages():

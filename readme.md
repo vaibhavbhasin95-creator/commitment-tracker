@@ -8,7 +8,7 @@ A local web app that turns meeting commitments ("I'll get that done by Friday") 
 
 Local prototype, free to use. **The up-to-date picture of what is real, what is simulated, and what isn't built is the "Current status" section of [prd.md](prd.md)** (PDF: `docs/Commitment_Tracker_PRD_v<version>.pdf`).
 
-Real: sign-in (password or SSO), transcript upload (text, `.docx`, `.pdf`) and Fathom capture, commitment extraction (built-in model or the customer's own AI), background jobs, two-way Google Sheets sync, people directory with designations, nudges by email (from your own draft, optionally AI-tailored) / Slack / Teams / custom webhook, signed webhooks, encrypted credentials, live dashboard updates. Still simulated: Jira and custom-tracker outbound sync, and "check now" pulls from Zoom / Google Meet / Teams / Otter.
+Real: sign-in (password or SSO), transcript upload (text, `.docx`, `.pdf`) and Fathom capture, commitment extraction (built-in model or the customer's own AI), asking questions about your meetings with cited answers ([src/rag/README.md](src/rag/README.md)), background jobs, two-way Google Sheets sync, people directory with designations, nudges by email (from your own draft, optionally AI-tailored) / Slack / Teams / custom webhook, signed webhooks, encrypted credentials, live dashboard updates. Still simulated: Jira and custom-tracker outbound sync, and "check now" pulls from Zoom / Google Meet / Teams / Otter.
 
 ## Folder layout
 
@@ -26,6 +26,7 @@ commitment-tracker/
 │   ├── transcript_parser.py    built-in extraction (ML classifier + rules)
 │   ├── ai_extraction.py        optional AI extraction engine (trial feature)
 │   ├── ai_writer.py            email-nudge drafts tailored by AI to designation
+│   ├── rag/                    ask questions about your meetings: search + cited answers (see rag/README.md)
 │   ├── notifications.py        email / Slack / Teams / custom senders
 │   ├── people_directory.py     people CSV + owner matching
 │   ├── google_sheets.py        Sheets API; google_oauth_setup.py: one-time login
@@ -88,12 +89,24 @@ The first extraction after a start is slow (the ML libraries load — several mi
 | `CT_JOBS_INLINE` | off | `1` = run jobs inside the request (tests) |
 | `NUDGE_CHECK_INTERVAL_SECONDS` | 900 | Automatic nudge check interval |
 | `AI_EXTRACTION_ENABLED` | on | `0` = turn the optional AI extraction feature off |
+| `RAG_ENABLED` | on | `0` = turn the optional "Ask your meetings" feature off (no page, routes or indexing) |
 | `ANTHROPIC_API_KEY` | — | AI-suggested setup steps for custom apps |
+
+### Ask your meetings
+
+Answers a question from your saved meetings, with the source of every claim. Full details in [src/rag/README.md](src/rag/README.md).
+
+1. On the **AI extraction** page, save an AI engine and confirm it (a local model such as GPT4All or Ollama works and keeps everything on your machine; the first question after a start can take a minute while the models load). Extraction can stay on Built-in.
+2. Open **Ask your meetings** in the sidebar and type a question.
+3. Meetings are indexed automatically in the background, including existing ones, within about a minute of the app starting. `python src/rag/backfill.py` indexes everything right away.
+
+The first use downloads a small embedding model (about 90 MB) from Hugging Face; behind a firewall that blocks it, download it once and point `SENTENCE_TRANSFORMERS_HOME` at the folder.
 
 ### Tests
 
 ```bash
 python src/tests/run_all.py          # every suite; temporary databases and fake services only
+python src/tests/run_all.py rag      # just the "Ask your meetings" suites
 ```
 
 ## Webhooks
@@ -133,6 +146,10 @@ Everything except the sign-in routes and webhooks needs a signed-in session; eve
 | `/api/transcript-source-settings`, `/api/transcript-source/…` | … | Transcript source |
 | `/api/webhook-security` · `/reveal` · `/rotate` | GET / POST | Webhook URLs, signing secret, recent deliveries |
 | `/api/events` | GET | Live updates stream |
+| `/ask` | GET | The "Ask your meetings" page |
+| `/api/rag/ask` | POST | `{"question": "..."}` → answer with citations (409 `consent_required` for a cloud engine's first use) |
+| `/api/rag/consent` · `/api/rag/reindex` | POST | One-time consent for a cloud engine · rebuild one meeting's search index |
+| `/api/rag/status` | GET | Whether the feature is on |
 
 ## Known limitations
 
@@ -142,4 +159,5 @@ The full list is in [prd.md](prd.md) under "Not built". The most important:
 - No email verification or password reset by email yet — reset with `manage_users.py`.
 - Scanned PDFs (no text layer) can't be read; there's no OCR.
 - Extraction quality on real meetings is limited until the model is retrained on real business-meeting transcripts.
+- "Ask your meetings" answers are only as good as the AI engine behind them, and its relevance thresholds are starting guesses that haven't yet been measured on a set of real questions (see [src/rag/README.md](src/rag/README.md) for the limits).
 - Inbound webhooks need a public URL (ngrok today). SQLite + Flask's server aren't meant for production as-is.
